@@ -9,9 +9,20 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import DATABASE_URL
 
-# Tách bỏ phần query parameters (như ?sslmode=require) khỏi URL để tránh asyncpg bị lỗi xung đột tham số
-db_url = DATABASE_URL.split("?")[0] if DATABASE_URL else DATABASE_URL
+# Đảm bảo loại bỏ khoảng trắng dư thừa, xuống dòng (nếu copy paste bị lỗi trên Render)
+db_url = DATABASE_URL.strip() if DATABASE_URL else ""
 
+# Tự động thay thế postgres:// hoặc postgresql:// mặc định của Render thành postgresql+asyncpg:// 
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif db_url.startswith("postgresql://"):
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+# Tách bỏ phần query parameters (như ?sslmode=require) khỏi URL để tránh asyncpg bị lỗi xung đột tham số
+db_url = db_url.split("?")[0]
+
+# Lưu ý: Render Internal DB có thể không cần SSL, nhưng External thì bắt buộc. 
+# "ssl": "require" an toàn để kết nối tới Render Postgres.
 engine = create_async_engine(
     db_url, 
     echo=False, 

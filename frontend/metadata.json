@@ -1,0 +1,6 @@
+{
+  "name": "Chuyên gia Thẩm định PCCC",
+  "description": "Hệ thống chatbot AI chuyên gia thẩm định hồ sơ, rà soát đối chiếu các thông số kỹ thuật thiết kế phòng cháy chữa cháy.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

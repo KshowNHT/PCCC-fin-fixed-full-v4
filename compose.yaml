@@ -1,0 +1,76 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pccc_db
+      POSTGRES_USER: pccc_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pccc_dev_pass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pccc_app -d pccc_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  backend:
+    build:
+      context: ./backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pccc_app:${POSTGRES_PASSWORD:-pccc_dev_pass}@postgres:5432/pccc_db
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:-CHANGE_ME_IN_PRODUCTION_pccc_secret_key}
+      # FIX (rà soát lần 2): 3 biến dưới đây đã có sẵn trong code từ các lần
+      # vá bảo mật trước (CORS configurable, giới hạn upload, hạn JWT) nhưng
+      # trước đây CHỈ được thêm vào docker-compose.yml — 1 file KHÔNG được
+      # run-docker.bat/stop-docker.bat/logs-docker.bat dùng tới (chúng chỉ
+      # gọi compose.yaml). Nghĩa là toàn bộ 3 cấu hình này CHƯA TỪNG có tác
+      # dụng thật trên máy bạn cho tới bản vá này.
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
+      PCCC_ALLOWED_ORIGINS: ${PCCC_ALLOWED_ORIGINS:-http://localhost:5173}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-25}
+      PCCC_ADMIN_USERNAME: ${PCCC_ADMIN_USERNAME:-admin}
+      PCCC_ADMIN_PASSWORD: ${PCCC_ADMIN_PASSWORD:-admin123}
+      MAX_STAFF_ACCOUNTS: ${MAX_STAFF_ACCOUNTS:-10}
+      NODE_ENV: production
+      PORT: 3000
+      PCCC_DATA_DIR: /app/data
+    ports:
+      - "8000:3000"
+    volumes:
+      - pccc_data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # FIX NGHIÊM TRỌNG (rà soát "sẵn sàng chạy online"): mặc định trước
+        # đây là "http://localhost:8000" — bị đóng cứng vào bundle JS, khiến
+        # app KHÔNG hoạt động khi deploy lên domain thật (trình duyệt của
+        # người dùng khác sẽ gọi nhầm về "localhost" của chính họ). Để trống
+        # mặc định = dùng đường dẫn tương đối "/api/...", tự động đúng trên
+        # mọi domain/IP nhờ Nginx proxy (xem frontend/nginx.conf). Xem chú
+        # thích đầy đủ trong frontend/Dockerfile.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  pccc_data:

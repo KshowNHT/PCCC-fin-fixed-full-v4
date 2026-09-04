@@ -1,0 +1,388 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-display: "Space Grotesk", sans-serif;
+  --color-brand-orange: #ea580c;
+  --color-brand-blue: #3b82f6;
+}
+
+@layer base {
+  body {
+    @apply bg-slate-50 text-slate-900 font-sans antialiased selection:bg-brand-orange/10 selection:text-brand-orange;
+  }
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-slate-300 rounded-full hover:bg-slate-400 transition-colors;
+}
+
+/* Custom interactive animation for Pie Chart sectors on hover */
+#verdict-pie-chart-row .recharts-pie-sector {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease, filter 0.22s ease;
+  cursor: pointer;
+  transform-origin: center;
+}
+
+#verdict-pie-chart-row .recharts-pie-sector:hover {
+  transform: scale(1.04);
+  opacity: 0.88;
+  filter: brightness(1.05) drop-shadow(0 6px 12px rgba(0, 0, 0, 0.12));
+}
+
+@media print {
+  /* Set A4 page details and margins */
+  @page {
+    size: A4 portrait;
+    margin: 15mm 12mm 15mm 12mm;
+  }
+
+  /* Force browsers to print exact colors and backgrounds */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    color-adjust: exact !important;
+  }
+
+  /* Reset high-level layouts to flow natively instead of full viewport grid scroll containers */
+  html, body, #root, #root > div {
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    background-color: white !important;
+  }
+
+  /* Hide app menus, header panels, status indicators and sidebars */
+  #app-sidebar,
+  #main-action-header,
+  #project-specs-banner,
+  #project-warnings-banner,
+  #compliance-dashboard-banner,
+  #tabs-navigation-bar,
+  .print-hidden,
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Expand main area container to occupies full page width */
+  #app-main-area {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background-color: white !important;
+  }
+
+  /* Format the verdict tab container */
+  #verdict-tab-content,
+  #full-verdict-tab-content {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: auto !important;
+    overflow: visible !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: transparent !important;
+  }
+
+  /* Compact spacing for print on a perfect single A4 layout */
+  .space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    --tw-space-y-reverse: 0;
+    margin-top: 0.85rem !important;
+    margin-bottom: 0 !important;
+  }
+
+  /* Shrink the big verdict badge (retro compatibility) */
+  #verdict-badge-card {
+    padding: 0.85rem 1rem !important;
+    border-radius: 12px !important;
+    margin-bottom: 0.85rem !important;
+    border-width: 2px !important;
+    box-shadow: none !important;
+  }
+
+  /* Scale font-sizes down slightly to ensure absolute single-page sizing */
+  #verdict-badge-card h3 {
+    font-size: 15px !important;
+  }
+  #verdict-badge-card p {
+    font-size: 10.5px !important;
+    margin-top: 0.2rem !important;
+  }
+
+  /* Legislative Notice print layout (retro compatibility) */
+  #verdict-legislative-notices {
+    padding: 0.75rem 1rem !important;
+    border-radius: 12px !important;
+    margin-bottom: 0.85rem !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: none !important;
+  }
+  #verdict-legislative-notices h4 {
+    font-size: 13.5px !important;
+  }
+  #verdict-legislative-notices p {
+    font-size: 10px !important;
+    line-height: 1.35 !important;
+  }
+
+  /* Force side-by-side flexbox alignment on Pie Chart and its legend metrics list (retro compatibility) */
+  #verdict-pie-chart-row {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 1.5rem !important;
+    padding: 0.85rem 1rem !important;
+    border-radius: 12px !important;
+    margin-bottom: 0.85rem !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: none !important;
+  }
+  
+  /* Left SVG element takes exactly 45% width to look incredibly aligned */
+  #verdict-pie-chart-row > div:first-child {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 45% !important;
+    height: 150px !important;
+  }
+
+  /* Constrain the SVG dimensions in print environment */
+  #verdict-pie-chart-row svg {
+    max-height: 140px !important;
+    width: 100% !important;
+    height: 140px !important;
+  }
+
+  /* Right legend menu list takes 55% space */
+  #verdict-pie-chart-row > div:last-child {
+    width: 55% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  #verdict-pie-chart-row h4 {
+    font-size: 12.5px !important;
+  }
+  #verdict-pie-chart-row p {
+    font-size: 9.5px !important;
+  }
+
+  /* Format indicator list rows */
+  #verdict-pie-chart-row .space-y-2 > div {
+    padding: 0.3rem 0.45rem !important;
+    background-color: #f8fafc !important;
+    border-color: #f1f5f9 !important;
+  }
+
+  /* Force exactly 2 column layout for summary metrics */
+  #verdict-summary-cards {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.75rem !important;
+    margin-top: 0.85rem !important;
+  }
+  #verdict-summary-cards > div {
+    padding: 0.65rem !important;
+    border-radius: 10px !important;
+    border-color: #cbd5e1 !important;
+    background-color: #f8fafc !important;
+    box-shadow: none !important;
+  }
+
+  /* ==========================================
+     NEW WIDESCREEN DOUBLE-PAGE SYSTEM PRINT FORMATTING
+     ========================================== */
+
+  /* Disable screen grid columns in print to stack elements natively */
+  #full-verdict-grid {
+    display: block !important;
+    width: 100% !important;
+  }
+
+  /* Enforce Left column (Badge & notices) as Page 1 Content */
+  #full-verdict-left-column {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 0 !important;
+    page-break-after: always !important;
+    break-after: page !important;
+  }
+
+  /* Relax margin restriction so items are beautifully spaced on Page 1 */
+  #full-verdict-left-column.space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1rem !important;
+  }
+
+  /* Format Page 1 Left Column: Big Result Badge */
+  #full-verdict-badge-card {
+    padding: 1.25rem 1.5rem !important;
+    border-radius: 16px !important;
+    border-width: 2px !important;
+    box-shadow: none !important;
+    background-color: #f8fafc !important;
+  }
+  #full-verdict-badge-card h2 {
+    font-size: 16px !important;
+    line-height: 1.25 !important;
+  }
+  #full-verdict-badge-card p {
+    font-size: 11px !important;
+    line-height: 1.45 !important;
+    margin-top: 0.45rem !important;
+    padding-top: 0.45rem !important;
+  }
+  #full-verdict-badge-card span {
+    font-size: 9.5px !important;
+  }
+
+  /* Format Page 1 Left Column: Legislative Notices */
+  #full-verdict-legislative-notices {
+    padding: 1.25rem 1.5rem !important;
+    border-radius: 16px !important;
+    border-width: 2px !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: none !important;
+    background-color: white !important;
+  }
+  #full-verdict-legislative-notices h4 {
+    font-size: 14px !important;
+    margin-bottom: 0.5rem !important;
+  }
+  #full-verdict-legislative-notices p {
+    font-size: 10.5px !important;
+    line-height: 1.4 !important;
+  }
+  #full-verdict-legislative-notices .grid {
+    display: grid !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 0.75rem !important;
+    margin-top: 0.75rem !important;
+    margin-bottom: 0.75rem !important;
+  }
+  #full-verdict-legislative-notices .grid > div {
+    padding: 0.5rem 0.75rem !important;
+    border-radius: 8px !important;
+    border-width: 1px !important;
+    border-color: #cbd5e1 !important;
+    background-color: #fafaf9 !important;
+  }
+  #full-verdict-legislative-notices .grid p {
+    font-size: 10.5px !important;
+  }
+  #full-verdict-legislative-notices .grid span {
+    font-size: 9.5px !important;
+  }
+
+  /* Enforce Right column (Pie chart & technical metadata overview) as Page 2 Content */
+  #full-verdict-right-column {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-top: 0 !important;
+    padding-top: 0 !important;
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  #full-verdict-right-column.space-y-6 > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 1.25rem !important;
+  }
+
+  /* Format Page 2 Right Column: Pie Chart Side-By-Side Layout */
+  #full-verdict-pie-chart-card {
+    display: grid !important;
+    grid-template-areas: 
+      "title title"
+      "chart legend" !important;
+    grid-template-columns: 1.1fr 0.9fr !important;
+    gap: 1.25rem !important;
+    padding: 1.25rem 1.5rem !important;
+    border-radius: 16px !important;
+    border-width: 2px !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: none !important;
+    background-color: white !important;
+  }
+  #full-verdict-pie-chart-card > div:nth-child(1) {
+    grid-area: title !important;
+    text-align: center !important;
+    margin-bottom: 0.25rem !important;
+  }
+  #full-verdict-pie-chart-card > div:nth-child(2) {
+    grid-area: chart !important;
+    height: 150px !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+  }
+  #full-verdict-pie-chart-card svg {
+    max-height: 140px !important;
+    width: 100% !important;
+    height: 140px !important;
+  }
+  #full-verdict-pie-chart-card > div:nth-child(3) {
+    grid-area: legend !important;
+    border-top: none !important;
+    border-left: 1px dashed #cbd5e1 !important;
+    padding-left: 1.5rem !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+  }
+  #full-verdict-pie-chart-card h4 {
+    font-size: 13px !important;
+  }
+  #full-verdict-pie-chart-card p {
+    font-size: 9.5px !important;
+  }
+  #full-verdict-pie-chart-card .space-y-1\.5 > div {
+    padding: 0.25rem 0.5rem !important;
+    background-color: #f8fafc !important;
+    border-radius: 6px !important;
+    border-color: #cbd5e1 !important;
+  }
+
+  /* Format Page 2 Right Column: Technical Metadata Characteristics Card */
+  #full-verdict-metadata-card {
+    padding: 1.25rem 1.5rem !important;
+    border-radius: 16px !important;
+    border-width: 1px !important;
+    border-color: #cbd5e1 !important;
+    box-shadow: none !important;
+    background-color: #f8fafc !important;
+  }
+  #full-verdict-metadata-card h4 {
+    font-size: 13.5px !important;
+    margin-bottom: 0.5rem !important;
+    padding-bottom: 0.35rem !important;
+  }
+  #full-verdict-metadata-card .space-y-2 > div {
+    border-bottom: 1px dashed #cbd5e1 !important;
+    padding-bottom: 0.35rem !important;
+    padding-top: 0.35rem !important;
+  }
+  #full-verdict-metadata-card .space-y-2 > div:last-child {
+    border-bottom: none !important;
+  }
+  #full-verdict-metadata-card span {
+    font-size: 11px !important;
+  }
+}
+

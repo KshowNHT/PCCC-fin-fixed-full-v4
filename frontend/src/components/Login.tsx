@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, User, Loader2 } from 'lucide-react';
-import { login, AuthUser } from '../lib/api';
+import { login, AuthUser } from '../lib/apiService';
 
 interface LoginProps {
   onLogin: (user: AuthUser) => void;
@@ -30,9 +30,9 @@ export function Login({ onLogin }: LoginProps) {
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
         <div className="flex justify-center">
-            <div className="h-16 w-16 bg-brand-blue rounded-xl flex items-center justify-center text-white font-bold text-2xl shadow-lg">
-                AI
-            </div>
+          <div className="h-16 w-16 bg-brand-blue rounded-xl flex items-center justify-center text-white font-bold text-2xl shadow-lg">
+            AI
+          </div>
         </div>
         <h2 className="mt-6 text-center text-3xl font-extrabold text-slate-900">
           Đăng nhập hệ thống
@@ -100,7 +100,7 @@ export function Login({ onLogin }: LoginProps) {
           </form>
 
           <div className="mt-6 text-center text-xs text-slate-500">
-             Tài khoản do quản trị viên hệ thống cấp. Liên hệ admin nếu chưa có tài khoản.
+            Tài khoản do quản trị viên hệ thống cấp. Liên hệ admin nếu chưa có tài khoản.
           </div>
         </div>
       </div>

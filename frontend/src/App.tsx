@@ -5,7 +5,7 @@ import { Login } from "./components/Login";
 import { BlueprintUpload } from "./components/BlueprintUpload";
 import { InspectionLogPanel } from "./components/InspectionLogPanel";
 import { ProjectInfo, DocumentItem, ChatMessage, ChecklistItem } from "./types";
-import { apiFetch, getStoredUser, verifySession, logout, AuthUser } from "./lib/api";
+import { apiFetch, getStoredUser, verifySession, logout, AuthUser } from "./lib/apiService";
 import { LogOut, ScanLine, History } from "lucide-react";
 
 interface Session {

@@ -9,7 +9,15 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import DATABASE_URL
 
-engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True)
+# Tách bỏ phần query parameters (như ?sslmode=require) khỏi URL để tránh asyncpg bị lỗi xung đột tham số
+db_url = DATABASE_URL.split("?")[0] if DATABASE_URL else DATABASE_URL
+
+engine = create_async_engine(
+    db_url, 
+    echo=False, 
+    pool_pre_ping=True,
+    connect_args={"ssl": "require"}
+)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

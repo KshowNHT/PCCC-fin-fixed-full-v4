@@ -1,6 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { X, UploadCloud, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { apiFetch } from '../lib/apiService';
+import { apiFetch } from '../lib/api';
 import { ProjectInfo } from '../types';
 
 interface BlueprintUploadProps {
@@ -88,8 +88,9 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
             onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
             onDragLeave={() => setIsDragging(false)}
             onDrop={onDrop}
-            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${isDragging ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-slate-400'
-              }`}
+            className={`border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition-colors ${
+              isDragging ? 'border-blue-500 bg-blue-50' : 'border-slate-300 hover:border-slate-400'
+            }`}
             onClick={() => document.getElementById('blueprint-file-input')?.click()}
           >
             <UploadCloud className="w-8 h-8 mx-auto text-slate-400 mb-2" />

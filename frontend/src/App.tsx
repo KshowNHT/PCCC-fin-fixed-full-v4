@@ -5,7 +5,9 @@ import { Login } from "./components/Login";
 import { BlueprintUpload } from "./components/BlueprintUpload";
 import { InspectionLogPanel } from "./components/InspectionLogPanel";
 import { ProjectInfo, DocumentItem, ChatMessage, ChecklistItem } from "./types";
-import { apiFetch, getStoredUser, verifySession, logout, AuthUser } from "./lib/apiService";
+import { apiFetch, getStoredUser, verifySession, logout, AuthUser } from "./lib/api";
+import { activateCodeProtection } from "./lib/codeProtection";
+import { DevToolsWarningOverlay } from "./components/DevToolsWarningOverlay";
 import { LogOut, ScanLine, History } from "lucide-react";
 
 interface Session {
@@ -30,6 +32,28 @@ export default function App() {
   // Trạng thái xác thực THẬT (JWT từ backend), thay cho isAuthenticated giả trước đây.
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(getStoredUser());
   const [authChecked, setAuthChecked] = useState(false);
+
+  // FIX (bổ sung theo yêu cầu): "khoá chặn" tài khoản test truy cập DevTools
+  // để xem/khai thác mã nguồn. Chỉ áp dụng cho role "staff" (tài khoản cấp
+  // cho người xem thử/QA bên ngoài) — TRỪ "admin" (chính đội ngũ vận hành,
+  // cần DevTools cho công việc debug thực tế của họ). Bật/tắt toàn cục qua
+  // biến môi trường VITE_ENABLE_CODE_PROTECTION (mặc định TẮT — chỉ bật khi
+  // build riêng cho môi trường demo/test công khai, xem .env.example).
+  // Xem cảnh báo kỹ thuật đầy đủ trong lib/codeProtection.ts: đây là biện
+  // pháp răn đe ở tầng trình duyệt, KHÔNG PHẢI hàng rào bảo mật tuyệt đối.
+  const [isDevToolsOpen, setIsDevToolsOpen] = useState(false);
+  useEffect(() => {
+    const protectionEnabled = import.meta.env.VITE_ENABLE_CODE_PROTECTION === "true";
+    if (!protectionEnabled || !currentUser || currentUser.role === "admin") {
+      setIsDevToolsOpen(false);
+      return;
+    }
+    const cleanup = activateCodeProtection({
+      onDevToolsDetected: () => setIsDevToolsOpen(true),
+      onDevToolsClosed: () => setIsDevToolsOpen(false),
+    });
+    return cleanup;
+  }, [currentUser]);
 
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
@@ -59,12 +83,53 @@ export default function App() {
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
   /** Parse lỗi 422 từ FastAPI (Pydantic) thành thông điệp tiếng Việt dễ hiểu. */
+  // FIX B18 (Bao_Cao_QA_Lan_3.md — Trung bình): lỗi validate của backend
+  // (Pydantic/FastAPI) luôn trả thông điệp TIẾNG ANH thô (vd: "Input should
+  // be less than or equal to 200") — hiện thẳng ra UI tiếng Việt gây khó
+  // hiểu cho cán bộ thẩm định. Nhãn trường tiếng Việt tương ứng từng field.
+  const FIELD_LABELS_VI: Record<string, string> = {
+    floors: "Số tầng nổi", basements: "Số tầng hầm", floorArea: "Diện tích xây dựng",
+    totalFloorArea: "Tổng diện tích sàn", height: "Chiều cao công trình", pcccHeight: "Chiều cao PCCC",
+    length: "Chiều dài", width: "Chiều rộng", fireRating: "Bậc chịu lửa", name: "Tên công trình",
+    location: "Địa điểm", investor: "Chủ đầu tư", designer: "Đơn vị thiết kế", type: "Loại công trình",
+    commercialDetails: "Chi tiết kinh doanh",
+  };
+
+  /** Dịch 1 thông điệp lỗi Pydantic tiếng Anh sang tiếng Việt theo mẫu
+   * thường gặp nhất. Không nhận diện được thì trả về thông điệp chung
+   * chung tiếng Việt — KHÔNG BAO GIỜ để lọt tiếng Anh thô ra UI. */
+  const translatePydanticMessage = (msg: string, fieldLabel: string): string => {
+    const le = msg.match(/Input should be less than or equal to ([\d.]+)/);
+    if (le) return `${fieldLabel}: giá trị phải nhỏ hơn hoặc bằng ${le[1]}.`;
+    const ge = msg.match(/Input should be greater than or equal to ([\d.]+)/);
+    if (ge) return `${fieldLabel}: giá trị phải lớn hơn hoặc bằng ${ge[1]}.`;
+    const lt = msg.match(/Input should be less than ([\d.]+)/);
+    if (lt) return `${fieldLabel}: giá trị phải nhỏ hơn ${lt[1]}.`;
+    const gt = msg.match(/Input should be greater than ([\d.]+)/);
+    if (gt) return `${fieldLabel}: giá trị phải lớn hơn ${gt[1]}.`;
+    const maxLen = msg.match(/String should have at most (\d+) character/);
+    if (maxLen) return `${fieldLabel}: không được vượt quá ${maxLen[1]} ký tự.`;
+    const minLen = msg.match(/String should have at least (\d+) character/);
+    if (minLen) return `${fieldLabel}: phải có tối thiểu ${minLen[1]} ký tự.`;
+    if (/Field required/i.test(msg)) return `${fieldLabel}: bắt buộc phải nhập.`;
+    if (/valid number/i.test(msg)) return `${fieldLabel}: phải là một số hợp lệ.`;
+    if (/valid integer/i.test(msg)) return `${fieldLabel}: phải là số nguyên hợp lệ.`;
+    // Không nhận diện được mẫu câu → thông điệp chung, không lộ tiếng Anh.
+    return `${fieldLabel}: dữ liệu không hợp lệ.`;
+  };
+
   const parseApiError = async (res: Response): Promise<string> => {
     try {
       const err = await res.json();
       if (typeof err.detail === "string") return err.detail;
       if (Array.isArray(err.detail)) {
-        return err.detail.map((d: any) => d.msg).join("; ");
+        return err.detail
+          .map((d: any) => {
+            const fieldKey = Array.isArray(d.loc) ? d.loc[d.loc.length - 1] : "";
+            const fieldLabel = FIELD_LABELS_VI[fieldKey] || "Dữ liệu";
+            return translatePydanticMessage(d.msg || "", fieldLabel);
+          })
+          .join(" ");
       }
     } catch {
       /* ignore parse error, dùng thông điệp mặc định bên dưới */
@@ -436,6 +501,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden font-sans relative">
+      {isDevToolsOpen && <DevToolsWarningOverlay />}
       {/* Thanh trên cùng: thông tin người dùng + tính năng OCR / Nhật ký kiểm tra + đăng xuất */}
       <div className="flex items-center justify-end gap-2 px-4 py-1.5 bg-white border-b border-slate-200 text-sm shrink-0 z-40">
         <button

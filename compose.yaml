@@ -14,6 +14,18 @@ services:
       timeout: 5s
       retries: 20
       start_period: 10s
+    # FIX (rà soát cuối cùng trước bàn giao): trước đây KHÔNG service nào có
+    # giới hạn tài nguyên — 1 container bị leak/quá tải (bug lạ, truy vấn
+    # nặng bất thường, PDF/DOCX cỡ lớn...) có thể chiếm hết RAM/CPU của cả
+    # VPS, làm SẬP LUÔN các service khác (kể cả hệ điều hành host nếu VPS
+    # nhỏ). Đặt giới hạn khởi điểm hợp lý cho quy mô đội ngũ nhỏ (<=10 nhân
+    # viên theo hợp đồng) — CẦN CHỈNH LẠI theo cấu hình VPS thật khi deploy
+    # (xem RAM/CPU thật của gói VPS trước khi đặt số cụ thể).
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
 
   backend:
     build:
@@ -51,6 +63,13 @@ services:
       timeout: 5s
       retries: 10
       start_period: 20s
+    # Backend là service nặng nhất (xử lý PDF/DOCX, gọi Gemini, chạy Python) —
+    # cấp nhiều tài nguyên nhất trong 3 service.
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+          cpus: "1.5"
 
   frontend:
     build:
@@ -64,12 +83,23 @@ services:
         # mọi domain/IP nhờ Nginx proxy (xem frontend/nginx.conf). Xem chú
         # thích đầy đủ trong frontend/Dockerfile.
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        # Bổ sung: "khoá chặn" DevTools cho tài khoản test (mặc định tắt,
+        # xem chú thích đầy đủ trong frontend/src/lib/codeProtection.ts và
+        # .env.example). Đặt VITE_ENABLE_CODE_PROTECTION=true trong .env nếu
+        # deploy bản demo/nghiệm thu chia sẻ username/password ra bên ngoài.
+        VITE_ENABLE_CODE_PROTECTION: ${VITE_ENABLE_CODE_PROTECTION:-false}
     restart: unless-stopped
     ports:
       - "5173:80"
     depends_on:
       backend:
         condition: service_healthy
+    # Nginx tĩnh — rất nhẹ, giới hạn thấp vẫn dư dùng cho quy mô đội nhỏ.
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.5"
 
 volumes:
   postgres_data:

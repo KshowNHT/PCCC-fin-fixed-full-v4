@@ -276,15 +276,37 @@ def generate_compliance_report_pdf(
     c.drawString(50, _top_y(current_y + 11), "I. THÔNG TIN CÔNG TRÌNH ĐẦU VÀO")
     current_y += 10 + 11
 
+    # FIX B15 (Bao_Cao_QA_Lan_3.md — Cao): bản PDF trước đây chỉ có 8 dòng,
+    # THIẾU hẳn "Kích thước hình học", "Diện tích xây dựng tầng 1", "Tổng
+    # diện tích sàn", "Chi tiết phần kinh doanh" so với bản DOCX (13 dòng)
+    # — hai định dạng xuất ra cho CÙNG 1 hồ sơ lại không khớp nhau, và bản
+    # PDF (thường dùng để trình ký) lại thiếu đúng số liệu diện tích sàn mà
+    # Mục II của chính nó dùng làm căn cứ kết luận. Bổ sung đủ 13 dòng,
+    # đồng bộ nội dung với docx_report.py.
+    # FIX B21 (cùng nguyên tắc với docx_report.py): không tự bịa dữ liệu cụ
+    # thể vào các trường trống — luôn fallback "Chưa cập nhật" trung thực.
+    _length, _width = project.get("length") or 0, project.get("width") or 0
+    _dimensions_text = f"{_length}m (dài) × {_width}m (rộng)" if (_length or _width) else "Chưa cập nhật"
+    _floor_area_val = project.get("floorArea") or 0
+    _total_floor_area_val = project.get("totalFloorArea") or 0
+    _floors_val = project.get("floors") or 0
+
     fields = [
         ("Tên công trình", project.get("name", "")),
         ("Chủ đầu tư", project.get("investor") or "Chưa cập nhật"),
         ("Địa điểm xây dựng", project.get("location") or "Chưa cập nhật"),
         ("Đơn vị thiết kế / Giai đoạn", f"{project.get('designer') or 'Chưa cập nhật'} / {project.get('stage') or 'Thiết kế cơ sở'}"),
         ("Loại công trình & Công năng", project.get("type", "")),
+        ("Kích thước hình học", _dimensions_text),
+        ("Diện tích xây dựng tầng 1", f"{_floor_area_val} m²" if _floor_area_val else "Chưa cập nhật"),
+        (
+            "Tổng diện tích sàn",
+            f"~{_total_floor_area_val} m² ({_floors_val} tầng nổi × {_floor_area_val} m²)" if _total_floor_area_val else "Chưa cập nhật",
+        ),
         ("Quy mô số tầng", f"{project.get('floors', 0)} tầng nổi, {project.get('basements', 0)} tầng hầm"),
         ("Chiều cao PCCC", f"{project.get('pcccHeight') or project.get('height', 0)} m (Chiều cao thực tế: {project.get('height', 0)} m)"),
-        ("Bậc chịu lửa dự kiến", project.get("fireRating") or "Bậc III"),
+        ("Bậc chịu lửa dự kiến", project.get("fireRating") or "Chưa chọn"),
+        ("Chi tiết phần kinh doanh", project.get("commercialDetails") or "Chưa cập nhật"),
     ]
 
     for label, val in fields:

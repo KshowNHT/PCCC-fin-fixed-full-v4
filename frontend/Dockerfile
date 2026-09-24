@@ -31,6 +31,11 @@ COPY . .
 ARG VITE_API_BASE_URL=""
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 
+# Bổ sung: bật/tắt "khoá chặn" DevTools cho tài khoản test (xem chú thích
+# đầy đủ trong src/lib/codeProtection.ts và .env.example). Mặc định tắt.
+ARG VITE_ENABLE_CODE_PROTECTION="false"
+ENV VITE_ENABLE_CODE_PROTECTION=${VITE_ENABLE_CODE_PROTECTION}
+
 RUN npm run build
 
 # Serve the production build using Nginx.

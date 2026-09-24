@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { X, CheckCircle2, XCircle, Clock } from 'lucide-react';
-import { apiFetch } from '../lib/apiService';
+import { apiFetch } from '../lib/api';
 
 interface InspectionLogEntry {
   id: string;

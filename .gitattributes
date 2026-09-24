@@ -1,0 +1,12 @@
+# Chuẩn hoá line ending: Windows (CRLF) khi checkout, nhưng lưu trong Git
+# luôn là LF — tránh lỗi "bad interpreter" khi Docker (Linux) build script,
+# và tránh diff bẩn (toàn bộ file đổi màu) khi làm việc chung Windows/Mac/Linux.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.pdf binary
+*.ttf binary
+*.ico binary

@@ -317,12 +317,19 @@ export function Sidebar({
                 <input
                   type="number"
                   min={0}
+                  max={200}
                   value={localFloors}
                   id="input-floors"
                   onChange={(e) => {
-                    // FIX B03: chặn số âm ngay tại UI (Math.max(0, ...)),
-                    // đồng bộ với validation ge=0 phía backend.
-                    const raw = e.target.value === "" ? "" : Math.max(0, Number(e.target.value));
+                    // FIX B03: chặn số âm ngay tại UI.
+                    // FIX B17 (Bao_Cao_QA_Lan_3.md — Trung bình): trước đây
+                    // KHÔNG có giới hạn trên — nhập 9999 khiến vòng lặp bên
+                    // dưới sinh 9.999 phần tử "floorFunctions", đẩy tổng số
+                    // phần tử DOM lên hơn 130.000, làm trình duyệt giật/treo.
+                    // Kẹp giá trị nhập tối đa 200 (khớp `le=200` phía backend
+                    // schemas_project.py) NGAY TẠI ONCHANGE — vòng lặp sinh
+                    // mảng bên dưới không bao giờ còn nhận được số vượt 200.
+                    const raw = e.target.value === "" ? "" : Math.min(200, Math.max(0, Number(e.target.value)));
                     const parsed = raw;
                     setLocalFloors(parsed);
                     const num = parsed === "" ? 0 : Number(parsed);
@@ -341,7 +348,11 @@ export function Sidebar({
                     });
                   }}
                   onBlur={() => {
-                    const num = localFloors === "" ? 0 : Number(localFloors);
+                    // FIX B17: kẹp lại lần nữa lúc blur (phòng trường hợp
+                    // dán/paste giá trị lớn mà không qua onChange từng ký tự).
+                    const clamped = localFloors === "" ? "" : Math.min(200, Math.max(0, Number(localFloors)));
+                    if (clamped !== localFloors) setLocalFloors(clamped);
+                    const num = clamped === "" ? 0 : Number(clamped);
                     let nextList = [...localFloorFunctions];
                     if (nextList.length < num) {
                       while (nextList.length < num) {
@@ -365,11 +376,14 @@ export function Sidebar({
                 <input
                   type="number"
                   min={0}
+                  max={20}
                   value={localBasements}
                   id="input-basements"
                   onChange={(e) => {
                     // FIX B03: chặn số âm ngay tại UI.
-                    const parsed = e.target.value === "" ? "" : Math.max(0, Number(e.target.value));
+                    // FIX B17: giới hạn tối đa 20 (khớp le=20 phía backend),
+                    // tránh sinh mảng basementFunctions/heights/areas quá lớn.
+                    const parsed = e.target.value === "" ? "" : Math.min(20, Math.max(0, Number(e.target.value)));
                     setLocalBasements(parsed);
                     const num = parsed === "" ? 0 : Number(parsed);
                     let nextFns = [...localBasementFunctions];
@@ -450,11 +464,12 @@ export function Sidebar({
                 <input
                   type="number"
                   min={0}
+                  max={1000}
                   value={localPcccHeight}
                   id="input-pccc-height"
                   onChange={(e) => {
-                    // FIX B03: chặn số âm ngay tại UI.
-                    const parsed = e.target.value === "" ? "" : Math.max(0, Number(e.target.value));
+                    // FIX B03: chặn số âm. FIX B17: giới hạn 1000m (khớp backend).
+                    const parsed = e.target.value === "" ? "" : Math.min(1000, Math.max(0, Number(e.target.value)));
                     setLocalPcccHeight(parsed);
                   }}
                   onBlur={() => onUpdateProject({ pcccHeight: localPcccHeight === "" ? 0 : Number(localPcccHeight) })}
@@ -506,11 +521,12 @@ export function Sidebar({
                             <input
                               type="number"
                               min={0}
+                              max={100}
                               value={curHeight}
                               step="0.1"
                               onChange={(e) => {
-                                // FIX B03: chặn số âm ngay tại UI.
-                                const nextVal = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value));
+                                // FIX B03: chặn số âm. FIX B17: giới hạn 100m cho tầng hầm.
+                                const nextVal = e.target.value === "" ? 0 : Math.min(100, Math.max(0, Number(e.target.value)));
                                 const next = [...localBasementHeights];
                                 next[idx] = nextVal;
                                 setLocalBasementHeights(next);
@@ -524,10 +540,11 @@ export function Sidebar({
                             <input
                               type="number"
                               min={0}
+                              max={1000000}
                               value={curArea}
                               onChange={(e) => {
-                                // FIX B03: chặn số âm ngay tại UI.
-                                const nextVal = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value));
+                                // FIX B03: chặn số âm. FIX B17: giới hạn 1.000.000m².
+                                const nextVal = e.target.value === "" ? 0 : Math.min(1000000, Math.max(0, Number(e.target.value)));
                                 const next = [...localBasementAreas];
                                 next[idx] = nextVal;
                                 setLocalBasementAreas(next);
@@ -541,10 +558,11 @@ export function Sidebar({
                             <input
                               type="number"
                               min={0}
+                              max={1000000}
                               value={curFootprint}
                               onChange={(e) => {
-                                // FIX B03: chặn số âm ngay tại UI.
-                                const nextVal = e.target.value === "" ? 0 : Math.max(0, Number(e.target.value));
+                                // FIX B03: chặn số âm. FIX B17: giới hạn 1.000.000m².
+                                const nextVal = e.target.value === "" ? 0 : Math.min(1000000, Math.max(0, Number(e.target.value)));
                                 const next = [...localBasementFootprints];
                                 next[idx] = nextVal;
                                 setLocalBasementFootprints(next);
@@ -606,11 +624,12 @@ export function Sidebar({
                 <input
                   type="number"
                   min={0}
+                  max={1000000}
                   value={localFloorArea}
                   id="input-floor-area"
                   onChange={(e) => {
-                    // FIX B03: chặn số âm ngay tại UI.
-                    const parsed = e.target.value === "" ? "" : Math.max(0, Number(e.target.value));
+                    // FIX B03: chặn số âm. FIX B17: giới hạn 1.000.000m² (khớp backend).
+                    const parsed = e.target.value === "" ? "" : Math.min(1000000, Math.max(0, Number(e.target.value)));
                     setLocalFloorArea(parsed);
                   }}
                   onBlur={() => onUpdateProject({ floorArea: localFloorArea === "" ? 0 : Number(localFloorArea) })}
@@ -623,11 +642,12 @@ export function Sidebar({
                 <input
                   type="number"
                   min={0}
+                  max={10000000}
                   value={localTotalFloorArea}
                   id="input-total-floor-area"
                   onChange={(e) => {
-                    // FIX B03: chặn số âm ngay tại UI.
-                    const parsed = e.target.value === "" ? "" : Math.max(0, Number(e.target.value));
+                    // FIX B03: chặn số âm. FIX B17: giới hạn 10.000.000m² (khớp backend).
+                    const parsed = e.target.value === "" ? "" : Math.min(10000000, Math.max(0, Number(e.target.value)));
                     setLocalTotalFloorArea(parsed);
                   }}
                   onBlur={() => onUpdateProject({ totalFloorArea: localTotalFloorArea === "" ? 0 : Number(localTotalFloorArea) })}

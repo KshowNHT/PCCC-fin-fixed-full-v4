@@ -173,3 +173,33 @@ npm install && npm run dev
    kết >90% độ chính xác trích dẫn/rà soát).
 5. **SSL/TLS chưa cấu hình** — `nginx.conf` hiện chỉ HTTP. Khi có domain
    thật, thêm Certbot hoặc đặt Caddy/Nginx TLS-termination phía trước.
+
+## 8. "Khoá chặn" tài khoản test truy cập DevTools (bổ sung mới)
+
+Tính năng mới: ngăn tài khoản `role="staff"` (cấp cho người xem thử/nghiệm
+thu bên ngoài) mở DevTools trình duyệt để xem/khai thác mã nguồn phía
+client. Tài khoản `admin` luôn được miễn trừ.
+
+**⚠️ Đọc kỹ trước khi bật**: đây là biện pháp răn đe ở tầng trình duyệt,
+**không phải** bảo mật tuyệt đối — không có cách nào 100% ngăn người dùng
+đủ kỹ thuật đọc mã JS chạy trong trình duyệt của chính họ (giới hạn vật lý
+của kiến trúc web). Xem cảnh báo kỹ thuật đầy đủ trong
+`frontend/src/lib/codeProtection.ts`. Toàn bộ logic nghiệp vụ nhạy cảm
+(thẩm định PCCC, xác thực...) vẫn luôn nằm ở backend, không gửi xuống
+client — đây mới là lớp bảo vệ thật sự.
+
+**Cách bật**: đặt trong `.env`:
+```
+VITE_ENABLE_CODE_PROTECTION=true
+```
+rồi build lại: `docker compose up -d --build` (biến này là build-arg của
+Vite, cần build lại image frontend mới có tác dụng — không phải biến runtime).
+
+**Hành vi khi bật** (chỉ áp dụng cho tài khoản staff):
+- Chặn chuột phải (menu ngữ cảnh)
+- Chặn phím tắt mở DevTools/xem mã nguồn/lưu trang (F12, Ctrl+Shift+I/J/C,
+  Ctrl+U, Ctrl+S và tương đương trên macOS)
+- Phát hiện DevTools đang mở (dạng gắn cạnh trình duyệt) → hiện overlay
+  cảnh báo che mờ nội dung, tự đóng lại khi người dùng đóng DevTools (không
+  xoá dữ liệu, không đăng xuất)
+- In cảnh báo chính sách sử dụng trong Console trình duyệt

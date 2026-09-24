@@ -10,12 +10,137 @@ thuộc LLM: mỗi nhánh if/elif ứng với một quy tắc cứng đối chi�
 17 hạng mục checklist. Dùng làm (a) fallback khi Gemini lỗi/quá tải, và
 (b) nguồn tham chiếu "ground truth" để đối chiếu kết quả LLM trả về.
 
+=== FIX B12 (Bao_Cao_QA_Lan_3.md — NGHIÊM TRỌNG) ===
+Trước đây hàm này KHÔNG hề đọc `project["type"]` — công năng công trình bị
+bỏ qua hoàn toàn. QA lần 3 đã chứng minh: quán karaoke 5 tầng, nhà ở dân
+dụng 5 tầng, và nhà kho 5 tầng cùng diện tích cho ra kết quả 17 mục GIỐNG
+HỆT NHAU và đều "không bắt buộc thẩm duyệt". Đây là rủi ro pháp lý thật —
+karaoke/vũ trường tại Việt Nam chịu giám sát PCCC nghiêm ngặt hơn hẳn nhà
+hỗn hợp thông thường (Thông tư 147/2020/TT-BCA, siết chặt thêm sau hàng
+loạt vụ cháy karaoke gây chết người 2022-2023), không thể áp chung ngưỡng
+"7 tầng hoặc 3.000m²" của nhóm F1.4.
+
+Hàm `_classify_building_category()` mới phân loại công năng theo từ khoá
+trong `type`/`commercialDetails`, rồi `evaluate_appraisal()` áp ngưỡng khác
+nhau theo từng nhóm. MINH BẠCH QUAN TRỌNG: các ngưỡng số cụ thể cho nhóm
+kho/chợ/trường học dưới đây là ƯỚC LƯỢNG THẬN TRỌNG (an toàn hơn là bỏ sót)
+dựa trên đặc điểm nguy cơ cháy của từng loại hình, KHÔNG thay thế được việc
+đối chiếu trực tiếp bảng phân loại nhóm nguy hiểm cháy nổ trong QCVN
+06:2022/BXD bởi kỹ sư PCCC có chứng chỉ hành nghề — hệ thống luôn gắn kèm
+cảnh báo yêu cầu rà soát thủ công cho các nhóm này và nhóm "chưa phân loại
+được", đúng khuyến nghị của QA (ưu tiên #2).
+
 Cũng chứa RAG context builder (getRagContextForProject) và cơ chế học từ
 lịch sử dự án tương đồng (getPriorProjectsContext) — port từ server.ts gốc.
 """
 from typing import Any, Dict, List, Optional
 
 from app.checklist_data import STANDARDS_CHECKLIST_TEMPLATE
+
+# FIX B12: các nhóm công năng được phân loại riêng, thứ tự kiểm tra có ý
+# nghĩa (karaoke kiểm tra trước "kinh doanh" chung chung vì 1 quán karaoke
+# vẫn có thể tự mô tả là "dịch vụ kinh doanh").
+_CATEGORY_KEYWORDS = {
+    "karaoke_entertainment": ("karaoke", "vũ trường", "quán bar", "disco", "vu truong", "bar/pub", "vũ trường"),
+    "warehouse": ("nhà kho", "kho chứa", "giá kệ", "kệ cao", "warehouse", " kho "),
+    "market_mall": ("chợ", "trung tâm thương mại", "siêu thị", "ttmm", "market", "shopping"),
+    "school": ("trường học", "mầm non", "tiểu học", "trung học", "school", "nhà trẻ"),
+    "mixed_residential": ("nhà hỗn hợp", "nhà ở kết hợp kinh doanh", "chung cư", "nhà ở riêng lẻ", "văn phòng"),
+}
+
+
+def _classify_building_category(project: Dict[str, Any]) -> str:
+    text = f"{project.get('type') or ''} {project.get('commercialDetails') or ''}".lower()
+    for category, keywords in _CATEGORY_KEYWORDS.items():
+        if any(k in text for k in keywords):
+            return category
+    return "unclassified"
+
+
+def _appraisal_threshold_for_category(category: str, floors: int, total_floor_area: float, height: float) -> tuple:
+    """Trả về (is_subject: bool, reason: str, category_warning: Optional[str])
+    theo đúng nhóm công năng — thay cho ngưỡng cứng duy nhất trước đây."""
+    if category == "karaoke_entertainment":
+        # FIX B12: karaoke/vũ trường/quán bar LUÔN thuộc diện khuyến nghị
+        # thẩm duyệt bất kể quy mô — không áp ngưỡng diện tích/tầng như nhà
+        # hỗn hợp thông thường, do lịch sử nguy cơ cháy đặc biệt cao và quy
+        # định siết chặt riêng (Thông tư 147/2020/TT-BCA và các văn bản sửa
+        # đổi sau 2022). Đây là lựa chọn AN TOÀN CHỦ ĐỘNG (fail-safe): thà
+        # yêu cầu thẩm duyệt dư còn hơn bỏ sót một cơ sở nguy cơ cao.
+        return (
+            True,
+            "Công trình có công năng kinh doanh dịch vụ karaoke/vũ trường/quán bar — nhóm ngành thuộc diện giám "
+            "sát PCCC đặc biệt nghiêm ngặt theo Thông tư 147/2020/TT-BCA (đã được sửa đổi bổ sung siết chặt hơn "
+            "sau các vụ cháy nghiêm trọng). Hệ thống mặc định khuyến nghị BẮT BUỘC thẩm duyệt thiết kế bởi cơ "
+            "quan Cảnh sát PCCC bất kể quy mô diện tích/số tầng, KHÔNG áp dụng ngưỡng của nhóm nhà hỗn hợp "
+            "thông thường (F1.4). Cần đối chiếu trực tiếp Thông tư 147/2020/TT-BCA và văn bản sửa đổi mới nhất.",
+            None,
+        )
+
+    if category == "warehouse":
+        is_subject = floors >= 1 and (total_floor_area >= 1000 or height >= 25)
+        return (
+            is_subject,
+            (
+                f"Công trình là nhà kho/kho chứa hàng — quy mô {total_floor_area}m² sàn / cao {height}m vượt "
+                "ngưỡng thận trọng cho nhóm kho hàng (ước lượng an toàn, chưa xét nhóm nguy hiểm cháy nổ cụ thể "
+                "của hàng hoá lưu trữ), khuyến nghị thẩm duyệt thiết kế PCCC."
+                if is_subject
+                else f"Công trình kho quy mô {total_floor_area}m² sàn / cao {height}m dưới ngưỡng thận trọng — "
+                "tuy nhiên BẮT BUỘC xác định nhóm nguy hiểm cháy nổ của hàng hoá lưu trữ (A/B/C/D/E theo QCVN "
+                "06:2022/BXD) trước khi kết luận cuối cùng, vì kho chứa hàng nhóm A/B/C có thể yêu cầu thẩm "
+                "duyệt ở quy mô nhỏ hơn nhiều."
+            ),
+            "Nhóm nhà kho: hệ thống CHƯA có dữ liệu về nhóm nguy hiểm cháy nổ của hàng hoá lưu trữ (A/B/C/D/E). "
+            "BẮT BUỘC kỹ sư PCCC rà soát thủ công đối chiếu QCVN 06:2022/BXD trước khi sử dụng kết luận này.",
+        )
+
+    if category == "market_mall":
+        is_subject = total_floor_area >= 1500 or floors >= 3
+        return (
+            is_subject,
+            f"Công trình chợ/trung tâm thương mại/siêu thị quy mô {total_floor_area}m² sàn, {floors} tầng — "
+            f"{'vượt' if is_subject else 'dưới'} ngưỡng thận trọng cho nhóm mật độ người sử dụng cao, "
+            f"{'khuyến nghị thẩm duyệt thiết kế PCCC.' if is_subject else 'vẫn cần tự rà soát đầy đủ QCVN 06:2022/BXD Bảng H.5.'}",
+            None,
+        )
+
+    if category == "school":
+        is_subject = floors >= 3 or total_floor_area >= 1500
+        return (
+            is_subject,
+            f"Công trình trường học/cơ sở giáo dục quy mô {floors} tầng, {total_floor_area}m² sàn — "
+            f"{'vượt' if is_subject else 'dưới'} ngưỡng thận trọng cho nhóm công trình có trẻ em/học sinh (khả "
+            f"năng thoát nạn hạn chế), {'khuyến nghị thẩm duyệt thiết kế PCCC.' if is_subject else 'vẫn cần tự rà soát an toàn thoát nạn kỹ lưỡng.'}",
+            None,
+        )
+
+    if category == "mixed_residential":
+        is_subject = floors >= 7 or total_floor_area >= 3000
+        return (
+            is_subject,
+            "Quy mô diện tích sàn >= 3.000m² hoặc số tầng >= 7 bắt buộc thẩm duyệt thiết kế PCCC theo Nghị "
+            "định 105/2025/NĐ-CP (nhóm nhà hỗn hợp/nhà ở kết hợp kinh doanh F1.4)."
+            if is_subject
+            else "Quy mô số tầng < 7 và diện tích sàn < 3.000m² không thuộc diện bắt buộc thẩm duyệt PCCC Công "
+            "an theo Nghị định 105/2025/NĐ-CP (nhóm nhà hỗn hợp F1.4), chỉ cần tự rà soát.",
+            None,
+        )
+
+    # "unclassified": KHÔNG âm thầm dùng ngưỡng F1.4 mặc định như bug cũ —
+    # vẫn tính theo ngưỡng chung để có kết quả tham khảo, nhưng LUÔN đính
+    # kèm cảnh báo rõ ràng rằng công năng chưa được hệ thống nhận diện.
+    is_subject = floors >= 7 or total_floor_area >= 3000
+    return (
+        is_subject,
+        "CHƯA XÁC ĐỊNH được nhóm công năng cụ thể từ thông tin đã nhập — hệ thống tạm áp ngưỡng chung của nhà "
+        f"hỗn hợp (7 tầng/3.000m² sàn) để tham khảo: {total_floor_area}m² sàn, {floors} tầng "
+        f"{'vượt ngưỡng, khuyến nghị thẩm duyệt.' if is_subject else 'dưới ngưỡng tham khảo.'}",
+        "Hệ thống CHƯA nhận diện được nhóm công năng cụ thể của công trình này từ mô tả đã nhập. Kết luận trên "
+        "chỉ mang tính tham khảo theo ngưỡng chung — BẮT BUỘC kỹ sư PCCC có chứng chỉ hành nghề rà soát thủ "
+        "công trước khi sử dụng làm căn cứ, đặc biệt nếu công trình thuộc nhóm nguy cơ cháy đặc biệt (karaoke, "
+        "vũ trường, kho hoá chất, gara ô tô, cơ sở y tế nội trú...).",
+    )
 
 
 def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
@@ -26,7 +151,12 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
     pccc_height = project.get("pcccHeight") or 0
     height = project.get("height") or 0
 
-    is_subject = floors >= 7 or total_floor_area >= 3000
+    # FIX B12: phân loại công năng trước khi tính is_subject — không còn
+    # dùng chung 1 ngưỡng "7 tầng/3.000m²" cho mọi loại công trình.
+    category = _classify_building_category(project)
+    is_subject, appraisal_reason, category_warning = _appraisal_threshold_for_category(
+        category, floors, total_floor_area, height
+    )
 
     checklist = []
     for t in STANDARDS_CHECKLIST_TEMPLATE:
@@ -36,12 +166,9 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
 
         if stt == 1:
             result = "Không đạt" if is_subject else "Không bắt buộc"
-            note = (
-                f"Công trình quy mô lớn ({floors} tầng, {total_floor_area}m² sàn) bắt buộc nộp hồ sơ "
-                "thẩm duyệt thiết kế PCCC tại Cảnh sát PCCC."
-                if is_subject
-                else "Không thuộc diện bắt buộc thẩm duyệt cơ quan công an. Chủ đầu tư tự thiết kế và chịu trách nhiệm."
-            )
+            # FIX B12: note mục 1 giờ phản ánh ĐÚNG nhóm công năng đã phân loại,
+            # không còn mô tả chung chung "công trình quy mô lớn" cho mọi loại hình.
+            note = appraisal_reason
         elif stt == 2:
             if floors > 4:
                 result = "Đạt" if fire_rating in ("Bậc I", "Bậc II") else "Không đạt"
@@ -68,9 +195,18 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
             result = "Khuyến nghị mạnh"
             note = "Bắt buộc trang bị bình bột chữa cháy xách tay ABC >= 4kg (mỗi tầng tối thiểu 1 bình; tầng kinh doanh tối thiểu 2 bình)."
         elif stt == 9:
-            if floors >= 7:
+            # FIX B12: karaoke/vũ trường bắt buộc báo cháy tự động ở mọi quy mô
+            # (không chỉ từ 7 tầng như nhóm nhà hỗn hợp) do đặc thù đông người,
+            # ánh sáng/âm thanh lớn làm giảm khả năng nhận biết cháy sớm.
+            requires_auto_alarm = floors >= 7 or category == "karaoke_entertainment"
+            if requires_auto_alarm:
                 result = "Không đạt"
-                note = "Bắt buộc phải trang bị hệ thống báo cháy tự động liên tủ trung tâm cho nhà cao từ 7 tầng trở lên."
+                note = (
+                    "Karaoke/vũ trường BẮT BUỘC trang bị hệ thống báo cháy tự động bất kể số tầng, do đặc thù "
+                    "phòng cách âm, ánh sáng/âm thanh lớn làm giảm khả năng người bên trong tự nhận biết cháy sớm."
+                    if category == "karaoke_entertainment"
+                    else "Bắt buộc phải trang bị hệ thống báo cháy tự động liên tủ trung tâm cho nhà cao từ 7 tầng trở lên."
+                )
             else:
                 result = "Không bắt buộc"
                 note = "Nhà quy mô nhỏ dưới 7 tầng không cưỡng bức trang bị hệ thống liên thông báo cháy tự động toàn diện."
@@ -133,23 +269,57 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
         warnings.append(
             "Tổng diện tích sàn khai báo không trùng khớp với tích số giữa (diện tích sàn x số tầng), cần đối chiếu kiểm tra thực tế."
         )
+    # FIX B12: đính kèm cảnh báo riêng cho nhóm kho / chưa phân loại được —
+    # bắt buộc rà soát thủ công, không để hệ thống "tự tin" kết luận thay
+    # kỹ sư có chứng chỉ hành nghề cho các nhóm công năng rủi ro cao.
+    if category_warning:
+        warnings.append(category_warning)
 
     return {
         "warnings": warnings,
         "checklist": checklist,
         "isSubjectToAppraisal": is_subject,
-        "appraisalReason": (
-            "Quy mô diện tích sàn >= 3.000m² hoặc số tầng >= 7 bắt buộc thẩm duyệt thiết kế PCCC theo Nghị định 105/2025/NĐ-CP."
-            if is_subject
-            else "Quy mô số tầng < 7 và diện tích sàn < 3.000m² không thuộc diện bắt buộc thẩm duyệt PCCC Công an theo Nghị định 105/2025/NĐ-CP, chỉ cần tự rà soát."
-        ),
+        "appraisalReason": appraisal_reason,
+        "buildingCategory": category,
     }
 
 
 def get_local_fallback_response(project: Dict[str, Any]) -> Dict[str, Any]:
+    """FIX B11 (Bao_Cao_QA_Lan_3.md — NGHIÊM TRỌNG): trước đây câu 'reply'
+    hứa hẹn "Dưới đây là kết quả rà soát..." nhưng KHÔNG có nội dung gì theo
+    sau NGAY TRONG KHUNG CHAT — 17 mục checklist thật ra hiển thị ở bảng
+    riêng (specs panel), không phải trong bong bóng chat. Người dùng đọc
+    "Dưới đây là..." rồi thấy trống → tưởng phần mềm hỏng hoàn toàn, dù dữ
+    liệu rà soát vẫn có đầy đủ và đúng ở nơi khác trên giao diện.
+
+    Sửa: 'reply' giờ TỰ CHỨA một bản tóm tắt ngắn gọn ngay trong khung chat
+    (không phụ thuộc người dùng phải tìm đúng bảng khác), đồng thời nói rõ
+    lý do (thiếu/lỗi cấu hình GEMINI_API_KEY hoặc dịch vụ Google gặp sự cố)
+    thay vì chỉ nói chung chung "lỗi kết nối hoặc giới hạn".
+    """
     result = evaluate_appraisal(project)
+    non_compliant = [c["criteria"] for c in result["checklist"] if c["result"] == "Không đạt"]
+    subject_text = "BẮT BUỘC thẩm duyệt thiết kế PCCC" if result["isSubjectToAppraisal"] else "KHÔNG bắt buộc thẩm duyệt (Công an)"
+
+    summary_lines = [
+        "⚠️ Hệ thống AI (Gemini) hiện không phản hồi được — có thể do chưa cấu hình GEMINI_API_KEY, hết hạn "
+        "mức sử dụng, hoặc dịch vụ Google đang gián đoạn. Hệ thống đã TỰ ĐỘNG chuyển sang bộ luật cứng "
+        "(rules engine nội bộ, không cần AI) để bạn vẫn có kết quả rà soát ngay lập tức:",
+        "",
+        f"• Kết luận: công trình {subject_text}.",
+    ]
+    if non_compliant:
+        summary_lines.append(f"• {len(non_compliant)} hạng mục CHƯA ĐẠT: {', '.join(non_compliant)}.")
+    else:
+        summary_lines.append("• Không có hạng mục nào bị đánh giá KHÔNG ĐẠT theo bộ luật cứng.")
+    summary_lines.append("• Xem đầy đủ 17 hạng mục kèm giải trình chi tiết trong bảng bên dưới/panel thông số dự án.")
+    summary_lines.append(
+        "Lưu ý: kết quả trên chỉ dựa vào công thức cố định, CHƯA có phân tích ngữ cảnh sâu như khi AI hoạt "
+        "động bình thường — khuyến nghị thử lại sau hoặc liên hệ quản trị viên kiểm tra cấu hình dịch vụ AI."
+    )
+
     return {
-        "reply": "Do lỗi kết nối hoặc giới hạn từ hệ thống AI, hệ thống tạm thời chuyển sang chế độ tự động rà soát cứng theo quy chuẩn quốc gia hiện hành. Dưới đây là kết quả rà soát thiết kế dựa trên các thông số của bạn:",
+        "reply": "\n".join(summary_lines),
         "warnings": result["warnings"],
         "isSubjectToAppraisal": result["isSubjectToAppraisal"],
         "appraisalReason": result["appraisalReason"],

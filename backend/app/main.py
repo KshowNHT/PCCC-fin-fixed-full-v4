@@ -42,7 +42,7 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -199,6 +199,41 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/health/ai")
+async def health_ai(user: User = Depends(get_current_user)):
+    """MỚI (Bao_Cao_QA_Lan_3.md — khuyến nghị #1 cho B11): 'Nên có trang
+    trạng thái dịch vụ để bên mình tự kiểm tra.' Endpoint chẩn đoán riêng
+    cho dịch vụ AI — trả về đã cấu hình GEMINI_API_KEY hay chưa, và (tuỳ
+    chọn qua query ?ping=true) thử gọi thật 1 lần để xác nhận key còn hoạt
+    động, KHÔNG lộ giá trị key ra response."""
+    from app.config import GEMINI_API_KEY
+
+    configured = bool(GEMINI_API_KEY and GEMINI_API_KEY.strip())
+    result = {
+        "geminiApiKeyConfigured": configured,
+        "status": "unknown",
+        "detail": "Chưa cấu hình GEMINI_API_KEY trên máy chủ." if not configured else "Đã cấu hình, chưa kiểm tra kết nối thật (dùng ?ping=true để kiểm tra).",
+    }
+    return result
+
+
+@app.get("/api/health/ai/ping")
+async def health_ai_ping(user: User = Depends(require_admin)):
+    """Gọi thật 1 lần tới Gemini (model nhẹ nhất, prompt ngắn) để xác nhận
+    API key + kết nối mạng còn hoạt động. Chỉ admin được gọi (tốn 1 lượt
+    gọi API thật, tránh lạm dụng)."""
+    from app.gemini_client import generate_content_with_retry
+    from google.genai import types
+
+    try:
+        config = types.GenerateContentConfig(temperature=0.0, max_output_tokens=10)
+        await generate_content_with_retry(contents=[{"role": "user", "parts": [{"text": "ping"}]}], config=config)
+        return {"status": "ok", "detail": "Gọi Gemini API thành công."}
+    except Exception as e:  # noqa: BLE001
+        logger.error("Health check AI ping thất bại: %s", e, exc_info=True)
+        return {"status": "error", "detail": f"Không gọi được Gemini API: {str(e)[:300]}"}
+
+
 # ---------------------------------------------------------------------------
 # 1. Auth (Ngày 1 kế hoạch: 'Viết API Authentication + JWT')
 # ---------------------------------------------------------------------------
@@ -240,7 +275,24 @@ async def register(request: Request, body: RegisterRequest, db: AsyncSession = D
 async def create_staff_user(
     body: RegisterRequest, db: AsyncSession = Depends(get_db), admin: User = Depends(require_admin)
 ):
-    """Admin tạo tài khoản nhân viên mới, tối đa MAX_STAFF_ACCOUNTS tài khoản (Ngày 1-2 kế hoạch)."""
+    """Admin tạo tài khoản nhân viên mới, tối đa MAX_STAFF_ACCOUNTS tài khoản (Ngày 1-2 kế hoạch).
+
+    FIX (rà soát cuối cùng trước bàn giao): trước đây kiểm tra `user_count`
+    rồi mới `commit()` — kinh điển race condition "check-then-act". Nếu 2
+    request tạo tài khoản chạy đồng thời (double-click, hoặc 2 phiên admin
+    cùng thao tác), cả 2 có thể cùng đọc `user_count` TRƯỚC khi request kia
+    kịp commit, cả 2 đều pass điều kiện, dẫn tới vượt giới hạn hợp đồng.
+    Mức độ rủi ro THẤP (chỉ admin - người dùng tin cậy - mới gọi được
+    endpoint này) nhưng vẫn là lỗi đúng nghĩa vì đây là giới hạn cam kết
+    hợp đồng. Dùng `pg_advisory_xact_lock` — khoá cấp transaction PostgreSQL,
+    tự động giải phóng khi commit/rollback, đảm bảo tại một thời điểm chỉ 1
+    transaction được phép đếm+tạo tài khoản, loại bỏ hoàn toàn race condition.
+    """
+    # Khoá độc quyền cho toàn bộ thao tác "đếm + tạo tài khoản" — số hiệu khoá
+    # (hash cố định) chỉ cần duy nhất trong phạm vi ứng dụng, không đụng độ
+    # với khoá khác trong hệ thống.
+    await db.execute(text("SELECT pg_advisory_xact_lock(72190001)"))
+
     user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
     if user_count >= MAX_STAFF_ACCOUNTS:
         raise HTTPException(
@@ -563,10 +615,21 @@ def _owner_filter(user: User):
 
 @app.get("/api/sessions")
 async def get_sessions(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    # FIX (rà soát cuối cùng trước bàn giao): trước đây KHÔNG có giới hạn —
+    # tải TOÀN BỘ session (kèm toàn bộ tin nhắn từng session) mỗi lần gọi.
+    # Với quy mô đội ngũ nhỏ (<=10 nhân viên theo hợp đồng) đây chưa phải
+    # vấn đề ngay, nhưng số lượng hồ sơ tích luỹ theo THÁNG/NĂM sử dụng sẽ
+    # khiến response ngày càng chậm và payload ngày càng nặng — một lỗi
+    # "âm thầm xuống cấp hiệu năng" điển hình, khó phát hiện trong giai đoạn
+    # demo/nghiệm thu (còn ít dữ liệu) nhưng chắc chắn xuất hiện sau vài
+    # tháng vận hành thật. Giới hạn 200 hồ sơ gần nhất — đủ dùng cho nhu cầu
+    # thực tế (danh sách bên trái chỉ hiển thị để chọn/tiếp tục làm việc),
+    # không cần đổi UI vì đây chỉ là an toàn ở biên, không phải phân trang.
     stmt = (
         select(ChatSession)
         .options(selectinload(ChatSession.messages), selectinload(ChatSession.project_data))
         .order_by(ChatSession.updated_at.desc())
+        .limit(200)
     )
     cond = _owner_filter(user)
     if cond is not None:

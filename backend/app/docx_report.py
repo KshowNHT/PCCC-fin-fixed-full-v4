@@ -125,21 +125,31 @@ def generate_pccc_report(
         f"{project.get('designer') or 'Chưa cập nhật'} / {project.get('stage') or 'Thiết kế cơ sở'}",
     )
     _input_row(input_table, "Loại công trình & Công năng", project.get("type", ""))
-    _input_row(input_table, "Kích thước hình học", f"{project.get('length', 0)}m (dài) × {project.get('width', 0)}m (rộng)")
-    _input_row(input_table, "Diện tích xây dựng tầng 1", f"{project.get('floorArea', 0)} m²")
+    # FIX B21 (Bao_Cao_QA_Lan_3.md — Thấp): trước đây khi length/width = 0
+    # (chưa nhập) vẫn in "0.0m (dài) × 0.0m (rộng)" như thể đã có số liệu
+    # thật — trên văn bản có mục ký xác nhận tư vấn, việc này dễ gây hiểu
+    # nhầm là đã đo đạc. Đổi thành "Chưa cập nhật" khi cả 2 giá trị đều 0.
+    _length, _width = project.get("length") or 0, project.get("width") or 0
+    _dimensions_text = f"{_length}m (dài) × {_width}m (rộng)" if (_length or _width) else "Chưa cập nhật"
+    _input_row(input_table, "Kích thước hình học", _dimensions_text)
+    _floor_area_val = project.get("floorArea") or 0
+    _input_row(input_table, "Diện tích xây dựng tầng 1", f"{_floor_area_val} m²" if _floor_area_val else "Chưa cập nhật")
     _input_row(
         input_table,
         "Tổng diện tích sàn",
-        f"~{total_floor_area} m² ({floors} tầng nổi × {project.get('floorArea', 0)} m²)",
+        f"~{total_floor_area} m² ({floors} tầng nổi × {project.get('floorArea', 0)} m²)" if total_floor_area else "Chưa cập nhật",
     )
     _input_row(input_table, "Quy mô tầng", f"{floors} tầng nổi, {project.get('basements', 0)} tầng hầm")
-    _input_row(input_table, "Chiều cao công trình (H)", f"{project.get('height', 0)} m")
-    _input_row(input_table, "Chiều cao PCCC", f"{project.get('pcccHeight') or project.get('height', 0)} m")
-    _input_row(input_table, "Bậc chịu lửa dự kiến", project.get("fireRating") or "Bậc III")
+    _input_row(input_table, "Chiều cao công trình (H)", f"{project.get('height', 0)} m" if project.get("height") else "Chưa cập nhật")
+    _input_row(input_table, "Chiều cao PCCC", f"{project.get('pcccHeight') or project.get('height', 0)} m" if (project.get("pcccHeight") or project.get("height")) else "Chưa cập nhật")
+    _input_row(input_table, "Bậc chịu lửa dự kiến", project.get("fireRating") or "Chưa chọn")
+    # FIX B21: trước đây fallback "Tầng 1 kinh doanh thương mại dịch vụ" —
+    # một câu MÔ TẢ CỤ THỂ tự bịa ra khi người dùng để trống, khác hẳn cách
+    # các trường khác đều fallback trung thực về "Chưa cập nhật". Đồng bộ lại.
     _input_row(
         input_table,
         "Chi tiết phần kinh doanh",
-        project.get("commercialDetails") or "Tầng 1 kinh doanh thương mại dịch vụ",
+        project.get("commercialDetails") or "Chưa cập nhật",
     )
     _set_col_widths(input_table, [35, 65])
 

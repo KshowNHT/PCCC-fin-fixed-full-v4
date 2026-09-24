@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.git/
+.gitignore
+data/uploads/*
+data/legal_db/*
+data/drawings/*
+!data/uploads/.gitkeep
+!data/legal_db/.gitkeep
+!data/drawings/.gitkeep

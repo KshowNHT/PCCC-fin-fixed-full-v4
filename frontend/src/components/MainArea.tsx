@@ -92,6 +92,31 @@ export function MainArea({
   const [isWarningsExpanded, setIsWarningsExpanded] = useState(true);
   const [sortColumn, setSortColumn] = useState<"stt" | "criteria" | "result" | null>("stt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  // FIX B19 (Bao_Cao_QA_Lan_3.md — Trung bình): trước đây banner cảnh báo
+  // mâu thuẫn diện tích chỉ dựa vào `warnings` — 1 state CHỈ cập nhật SAU
+  // khi nhận phản hồi từ server (PUT /project), nên luôn "trễ 1 nhịp" so
+  // với giá trị người dùng vừa gõ (sửa 2 ô liên tiếp trước khi request đầu
+  // kịp trả lời → banner hiện cảnh báo cho state CŨ). Tính lại CỤC BỘ, tức
+  // thời, dùng CHÍNH `projectInfo` (props hiện tại, luôn mới nhất) — công
+  // thức giống hệt backend rules_engine.py để không lệch kết quả.
+  const hasAreaContradiction = React.useMemo(() => {
+    const floors = projectInfo.floors || 0;
+    const floorArea = projectInfo.floorArea || 0;
+    const totalFloorArea = projectInfo.totalFloorArea || 0;
+    return floors > 0 && floorArea > 0 && Math.abs(totalFloorArea - floorArea * floors) > 10;
+  }, [projectInfo.floors, projectInfo.floorArea, projectInfo.totalFloorArea]);
+
+  // FIX B19 (tiếp): danh sách cảnh báo hiển thị = cảnh báo mâu thuẫn diện
+  // tích LUÔN tính tức thời (không đợi server) + các cảnh báo KHÁC từ server
+  // (vd cảnh báo B12 về nhóm công năng chưa phân loại) — lọc bỏ dòng mâu
+  // thuẫn diện tích cũ do server trả về để tránh hiển thị trùng/lệch nhịp.
+  const AREA_WARNING_TEXT =
+    "Tổng diện tích sàn khai báo không trùng khớp với tích số giữa (diện tích sàn x số tầng), cần đối chiếu kiểm tra thực tế.";
+  const displayWarnings = React.useMemo(() => {
+    const others = (warnings || []).filter((w) => w !== AREA_WARNING_TEXT);
+    return hasAreaContradiction ? [AREA_WARNING_TEXT, ...others] : others;
+  }, [warnings, hasAreaContradiction]);
   const [checklistSearchQuery, setChecklistSearchQuery] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -352,7 +377,17 @@ export function MainArea({
   }, [checklist, filterResult, checklistSearchQuery, sortColumn, sortDirection]);
 
   return (
-    <div id="app-main-area" className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full overflow-y-auto custom-scrollbar relative font-sans print:overflow-visible print:bg-white print:p-0">
+    <div id="app-main-area" className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full overflow-hidden relative font-sans print:overflow-visible print:bg-white print:p-0">
+      {/* FIX B23 (Bao_Cao_QA_Lan_3.md — Thấp): container ngoài cùng trước
+          đây có CẢ `h-full` LẪN `overflow-y-auto` — xung đột với vùng cuộn
+          riêng của khung tin nhắn bên trong (dòng ~863, cũng overflow-y-auto).
+          Có 2 lớp overflow:auto lồng nhau trong cùng 1 chuỗi flexbox là lỗi
+          WebKit di động kinh điển (flex item revert về "min-height: auto",
+          co lại theo kích thước NỘI DUNG thay vì lấp đầy chiều cao khả dụng)
+          — khớp đúng triệu chứng QA mô tả: nội dung dừng ở ~55% màn hình,
+          phần còn lại trắng, khung nhập không neo đáy. Đổi outer container
+          thành `overflow-hidden` (không tự cuộn), giao toàn bộ việc cuộn
+          cho các vùng con bên trong (đã có sẵn overflow-y-auto riêng). */}
       {/* Top action header bar */}
       <div id="main-action-header" className="sticky top-0 bg-white border-b border-slate-200 px-3 sm:px-6 py-3 sm:py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 shadow-sm z-25 flex-shrink-0 print:hidden">
         <div className="flex items-center gap-3">
@@ -385,7 +420,8 @@ export function MainArea({
         <div className="flex items-center flex-wrap gap-2 shrink-0">
           <button
             onClick={onTriggerAppraisal}
-            disabled={isPending}
+            disabled={isPending || hasAreaContradiction}
+            title={hasAreaContradiction ? "Vui lòng sửa mâu thuẫn diện tích trước khi thẩm định (xem cảnh báo phía trên)" : undefined}
             id="btn-trigger-appraisal-main"
             className="flex items-center gap-1.5 py-1.5 px-3 bg-[#801818] hover:bg-[#681010] text-white font-bold text-xs rounded-lg shadow-md shadow-red-950/15 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer"
           >
@@ -397,9 +433,27 @@ export function MainArea({
             Thực hiện kiểm duyệt
           </button>
 
+          {/* FIX B04 (Bao_Cao_QA_Lan_3.md — Chưa fix theo QA lần 3, dù đã có
+              code trước đó): thêm nút Huỷ THỨ HAI, đặt CỐ ĐỊNH ngay trong
+              thanh hành động trên cùng (luôn hiển thị bất kể vị trí cuộn
+              chat), không chỉ phụ thuộc vào bong bóng chat tạm thời có thể
+              biến mất nhanh hoặc nằm ngoài vùng nhìn thấy. Tăng độ chắc chắn
+              người dùng luôn thấy được nút Huỷ khi isPending=true. */}
+          {isPending && onCancelPending && (
+            <button
+              onClick={onCancelPending}
+              id="btn-cancel-pending-main"
+              className="flex items-center gap-1.5 py-1.5 px-3 bg-white hover:bg-red-50 text-red-600 font-bold text-xs rounded-lg border border-red-300 shadow-sm transition-all active:scale-[0.98] cursor-pointer"
+              title="Huỷ tiến trình phân tích AI đang chạy"
+            >
+              <XCircle className="w-3.5 h-3.5" />
+              Huỷ
+            </button>
+          )}
+
           <button
             onClick={onExportReport}
-            disabled={isExporting || isExportingPdf || checklist.length === 0}
+            disabled={isExporting || isExportingPdf || checklist.length === 0 || hasAreaContradiction}
             id="btn-export-word"
             className="flex items-center gap-1.5 py-1.5 px-3 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium text-xs rounded-lg shadow-sm shadow-brand-orange/15 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer"
           >
@@ -413,7 +467,7 @@ export function MainArea({
 
           <button
             onClick={onExportReportPdf}
-            disabled={isExporting || isExportingPdf || checklist.length === 0}
+            disabled={isExporting || isExportingPdf || checklist.length === 0 || hasAreaContradiction}
             id="btn-export-pdf"
             className="flex items-center gap-1.5 py-1.5 px-3 bg-red-600 hover:bg-red-700 text-white font-medium text-xs rounded-lg shadow-sm shadow-red-600/15 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer"
           >
@@ -550,7 +604,7 @@ export function MainArea({
       </div>
 
       {/* Warnings & Inconsistencies Alert Zone if any */}
-      {warnings && warnings.length > 0 && (
+      {displayWarnings && displayWarnings.length > 0 && (
         <div id="project-warnings-banner" className="bg-orange-50/70 border-b border-orange-100 px-6 py-2 flex flex-col flex-shrink-0 print:hidden transition-all duration-200">
           <div className="flex items-center justify-between gap-4">
             <div 
@@ -560,11 +614,11 @@ export function MainArea({
             >
               <AlertTriangle className="w-4 h-4 text-brand-orange shrink-0 animate-pulse" />
               <h3 className="text-[11px] font-semibold text-orange-850 uppercase tracking-wider font-display shrink-0">
-                Phát hiện mâu thuẫn cần cảnh báo ({warnings.length}):
+                Phát hiện mâu thuẫn cần cảnh báo ({displayWarnings.length}):
               </h3>
               {!isWarningsExpanded && (
                 <span className="text-xs text-orange-700 truncate font-medium ml-2 select-none">
-                  {warnings.join(" | ")} (Bấm để xem đầy đủ)
+                  {displayWarnings.join(" | ")} (Bấm để xem đầy đủ)
                 </span>
               )}
             </div>
@@ -579,7 +633,7 @@ export function MainArea({
           {isWarningsExpanded && (
             <div className="pl-6.5 mt-1 border-t border-orange-200/40 pt-1.5 animate-fade-in">
               <ul className="list-disc list-inside text-xs text-orange-800 space-y-0.5">
-                {warnings.map((warn, i) => (
+                {displayWarnings.map((warn, i) => (
                   <li key={i}>{warn}</li>
                 ))}
               </ul>
@@ -611,7 +665,12 @@ export function MainArea({
                       <span className={`font-mono font-extrabold text-sm ${
                         compliancePercentage >= 80 ? "text-emerald-600" : compliancePercentage >= 50 ? "text-amber-600" : "text-rose-600"
                       }`}>
-                        {compliancePercentage}% ({compliantCount}/{totalItems} hạng mục đạt)
+                        {/* FIX B13 (Bao_Cao_QA_Lan_3.md — Cao): compliantCount
+                            đếm gộp cả "Đạt" VÀ "Không bắt buộc" nhưng nhãn cũ
+                            ghi "hạng mục đạt" — gây hiểu nhầm là đã kiểm tra
+                            và đạt yêu cầu. Đồng bộ nhãn giống tab Kết luận Pháp
+                            lý ("Đạt & Không bắt buộc") ở mọi nơi trên giao diện. */}
+                        {compliancePercentage}% ({compliantCount}/{totalItems} đạt & không bắt buộc)
                       </span>
                     </div>
                     
@@ -678,7 +737,7 @@ export function MainArea({
                     <span className={`font-mono font-black text-xs ${
                       compliancePercentage >= 80 ? "text-emerald-600" : compliancePercentage >= 50 ? "text-amber-600" : "text-rose-600"
                     }`}>
-                      {compliancePercentage}% ({compliantCount}/{totalItems} đạt)
+                      {compliancePercentage}% ({compliantCount}/{totalItems} đạt & không bắt buộc)
                     </span>
                     {/* Mini inline bar */}
                     <div className="w-20 bg-slate-200 h-1.5 rounded-full overflow-hidden hidden sm:block ml-2">
@@ -712,7 +771,15 @@ export function MainArea({
       })()}
 
       {/* Tabs navigation */}
-      <div id="tabs-navigation-bar" className="bg-white border-b border-slate-200 px-6 flex gap-4 flex-shrink-0 overflow-x-auto scrollbar-none whitespace-nowrap print:hidden">
+      {/* FIX B22 (Bao_Cao_QA_Lan_3.md — Thấp): dải tab CÓ cuộn ngang được
+          nhưng không có bất kỳ chỉ dấu nào báo còn nội dung bên phải — trên
+          màn hình 375px, tab "Kết luận Pháp lý PCCC" nằm ngoài vùng nhìn
+          thấy, người dùng tưởng phần mềm thiếu chức năng. Bọc trong wrapper
+          `relative` + thêm dải mờ (gradient fade) cố định bên phải, chỉ
+          hiện trên màn hình nhỏ (`sm:hidden`), làm tín hiệu thị giác "còn
+          nội dung cuộn tiếp" — không cần theo dõi vị trí cuộn bằng JS. */}
+      <div className="relative flex-shrink-0">
+        <div id="tabs-navigation-bar" className="bg-white border-b border-slate-200 px-6 flex gap-4 overflow-x-auto scrollbar-none whitespace-nowrap print:hidden">
         <button
           onClick={() => setActiveTab("chat")}
           className={`py-3 px-1 font-semibold text-xs flex items-center gap-1.5 border-b-2 transition-all cursor-pointer shrink-0 ${
@@ -791,6 +858,10 @@ export function MainArea({
             </span>
           </button>
         )}
+        </div>
+        {/* FIX B22: dải mờ chỉ báo còn nội dung cuộn ngang, chỉ hiện trên
+            màn hình nhỏ (sm:hidden) — không chặn click nhờ pointer-events-none. */}
+        <div className="sm:hidden absolute top-0 right-0 bottom-0 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none" />
       </div>
 
       {/* Dynamic Content Panel area */}
@@ -1173,7 +1244,7 @@ export function MainArea({
                   <div className="flex items-center gap-2 flex-wrap">
                     <button
                       onClick={onExportReport}
-                      disabled={isExporting || checklist.length === 0}
+                      disabled={isExporting || checklist.length === 0 || hasAreaContradiction}
                       className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-extrabold px-3 py-2 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
                     >
                       <Download className="w-3.5 h-3.5" />
@@ -1181,7 +1252,7 @@ export function MainArea({
                     </button>
                     <button
                       onClick={onExportReportPdf}
-                      disabled={isExportingPdf || checklist.length === 0}
+                      disabled={isExportingPdf || checklist.length === 0 || hasAreaContradiction}
                       className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-extrabold px-3 py-2 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
                     >
                       <FileDown className="w-3.5 h-3.5" />
@@ -1729,7 +1800,7 @@ export function MainArea({
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={onExportReportPdf}
-                    disabled={isExportingPdf || checklist.length === 0}
+                    disabled={isExportingPdf || checklist.length === 0 || hasAreaContradiction}
                     className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-white font-extrabold px-3 py-2 rounded-xl text-xs shadow-md transition-all active:scale-95 cursor-pointer"
                   >
                     <FileDown className="w-3.5 h-3.5" />
@@ -1982,10 +2053,17 @@ export function MainArea({
                         const datCount = checklist.filter(item => item.result === "Đạt" || item.result === "Không bắt buộc").length;
                         const khongDatCount = checklist.filter(item => item.result === "Không đạt").length;
                         const xemSetCount = checklist.filter(item => item.result === "Khuyến nghị mạnh" || item.result === "Khuyến nghị" || item.result === "Cần xem xét").length;
-                        
+                        // FIX B16 (Bao_Cao_QA_Lan_3.md — Trung bình): chú giải
+                        // trước đây thiếu hẳn dòng "Cần đo đạc" — biểu đồ tròn
+                        // (data ở trên) đã có đủ 4 phần, nhưng phần chú giải
+                        // văn bản chỉ liệt kê 3/4 nhóm nên chỉ cộng ra 15/17.
+                        // Thêm biến đếm + dòng chú giải thứ 4 để khớp đủ.
+                        const canDoDacCount = checklist.filter(item => item.result === "Cần đo đạc").length;
+
                         const datPct = total > 0 ? Math.round((datCount / total) * 100) : 0;
                         const khongDatPct = total > 0 ? Math.round((khongDatCount / total) * 100) : 0;
                         const xemSetPct = total > 0 ? Math.round((xemSetCount / total) * 100) : 0;
+                        const canDoDacPct = total > 0 ? Math.round((canDoDacCount / total) * 100) : 0;
 
                         return (
                           <div className="space-y-1.5 pt-2 border-t border-slate-100">
@@ -2025,6 +2103,18 @@ export function MainArea({
                                 </span>
                               </div>
                             </div>
+                            {/* FIX B16: dòng chú giải thứ 4 còn thiếu — Cần đo đạc */}
+                            <div className="flex items-center justify-between text-xs py-1">
+                              <span className="text-slate-600 font-bold">Cần đo đạc:</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono font-black text-cyan-600">
+                                  {canDoDacCount} / {total} Hạng mục
+                                </span>
+                                <span className="font-mono font-black bg-cyan-100 text-cyan-800 px-1.5 py-0.5 rounded text-[10px]">
+                                  {canDoDacPct}%
+                                </span>
+                              </div>
+                            </div>
                           </div>
                         );
                       })()}
@@ -2035,36 +2125,58 @@ export function MainArea({
                       <h4 className="font-display font-black text-slate-900 text-sm uppercase tracking-tight pb-2 border-b border-slate-300">
                         Thông số kỹ thuật công trình
                       </h4>
+                      {/* FIX B14 (Bao_Cao_QA_Lan_3.md — Cao): bảng này trước
+                          đây có 3 lỗi: (a) nhãn "Tổng Diện tích xây dựng" nhưng
+                          hiện giá trị totalFloorArea (nhầm với floorArea);
+                          (b) "Chiều cao số tầng" là nhãn gộp sai — giá trị thật
+                          là SỐ TẦNG, còn chiều cao PCCC không hiện ở đâu cả;
+                          (c) "Bậc chịu lửa thiết kế tối thiểu" bị HARDCODE
+                          theo floors<=4 (luôn suy ra Bậc II/III), HOÀN TOÀN
+                          bỏ qua giá trị fireRating thật đã khai báo — mâu
+                          thuẫn trực tiếp với mục 2 của bảng 17 hạng mục.
+                          Đồng thời sửa luôn dòng "Phân nhóm công năng" vốn
+                          cũng hardcode cứng "F1.4" bất kể loại công trình
+                          thật (lỗi cùng bản chất với B12 ở tầng hiển thị). */}
                       <div className="space-y-2 text-xs">
                         <div className="flex justify-between py-1">
                           <span className="text-slate-500 font-bold">Tên hồ sơ rà soát:</span>
-                          {/* FIX: trước đây fallback "Nhà hỗn hợp" hiển thị
-                              như thể đã có tên thật dù chưa nhập gì (QA lần 2
-                              ghi nhận: hiển thị cứng dữ liệu mẫu khi form
-                              đang để trống). */}
                           <span className="text-slate-800 font-black">{projectInfo.name || "Chưa đặt tên"}</span>
                         </div>
                         <div className="flex justify-between py-1">
-                          <span className="text-slate-500 font-bold">Tổng Diện tích xây dựng:</span>
+                          <span className="text-slate-500 font-bold">Diện tích xây dựng (1 tầng):</span>
+                          <span className="text-slate-800 font-black">
+                            {projectInfo.floorArea ? `${projectInfo.floorArea} m²` : "Chưa nhập"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1">
+                          <span className="text-slate-500 font-bold">Tổng diện tích sàn:</span>
                           <span className="text-slate-800 font-black">
                             {projectInfo.totalFloorArea ? `${projectInfo.totalFloorArea} m²` : "Chưa nhập"}
                           </span>
                         </div>
                         <div className="flex justify-between py-1">
-                          <span className="text-slate-500 font-bold">Chiều cao số tầng:</span>
+                          <span className="text-slate-500 font-bold">Số tầng nổi / hầm:</span>
                           <span className="text-slate-800 font-black">
-                            {projectInfo.floors ? `${projectInfo.floors} tầng nổi` : "Chưa nhập"}
+                            {projectInfo.floors || 0} tầng nổi{projectInfo.basements ? ` / ${projectInfo.basements} tầng hầm` : ""}
                           </span>
                         </div>
                         <div className="flex justify-between py-1">
-                          <span className="text-slate-500 font-bold">Bậc chịu lửa thiết kế tối thiểu:</span>
+                          <span className="text-slate-500 font-bold">Chiều cao PCCC:</span>
                           <span className="text-slate-800 font-black">
-                            {projectInfo.floors <= 4 ? "Bậc III (Quy chuẩn tiêu chuẩn)" : "Bậc II (Bản thiết kế)"}
+                            {projectInfo.pcccHeight || projectInfo.height ? `${projectInfo.pcccHeight || projectInfo.height} m` : "Chưa nhập"}
                           </span>
                         </div>
                         <div className="flex justify-between py-1">
-                          <span className="text-slate-500 font-bold">Phân nhóm công năng PCCC nguy hiểm:</span>
-                          <span className="text-slate-800 font-black">F1.4 (Nhà hỗn hợp riêng lẻ kinh doanh)</span>
+                          <span className="text-slate-500 font-bold">Bậc chịu lửa đã khai báo:</span>
+                          <span className="text-slate-800 font-black">
+                            {projectInfo.fireRating || "Chưa chọn"}
+                          </span>
+                        </div>
+                        <div className="flex justify-between py-1">
+                          <span className="text-slate-500 font-bold">Loại công trình / Công năng:</span>
+                          <span className="text-slate-800 font-black text-right ml-2">
+                            {projectInfo.type || "Chưa xác định"}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -2073,6 +2185,7 @@ export function MainArea({
               </div>
             )}
             </div>
+
           </div>
         </div>
       )}

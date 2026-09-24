@@ -132,6 +132,3 @@ desktop.ini
 # -------------------------
 .cache/
 .parcel-cache/
-
-
-!frontend/src/lib/

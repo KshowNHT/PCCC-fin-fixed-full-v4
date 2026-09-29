@@ -32,6 +32,10 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # Theo kế hoạch Ngày 1: "Khởi tạo FastAPI, kết nối PostgreSQL."
 _INSECURE_DATABASE_URL_DEFAULT = "postgresql+asyncpg://pccc_app:pccc_dev_pass@localhost:5432/pccc_db"
 DATABASE_URL = os.environ.get("DATABASE_URL", _INSECURE_DATABASE_URL_DEFAULT)
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
+elif DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
 
 # --- Auth / JWT (Ngày 1: "Viết API Authentication + JWT") ---
 _INSECURE_JWT_DEFAULT = "CHANGE_ME_IN_PRODUCTION_pccc_secret_key"

@@ -39,7 +39,7 @@ if not exist ".env" (
         echo [WARNING] Before real use: also change JWT_SECRET and
         echo [WARNING] PCCC_ADMIN_PASSWORD in .env - the backend will
         echo [WARNING] REFUSE TO START with the default values shipped
-        echo [WARNING] in .env.example (this is intentional, for safety).
+        echo [WARNING] in .env.example ^(this is intentional, for safety^).
         echo.
     )
 )

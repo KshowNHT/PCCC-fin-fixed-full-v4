@@ -47,7 +47,7 @@ services:
       PCCC_ADMIN_USERNAME: ${PCCC_ADMIN_USERNAME:-admin}
       PCCC_ADMIN_PASSWORD: ${PCCC_ADMIN_PASSWORD:-admin123}
       MAX_STAFF_ACCOUNTS: ${MAX_STAFF_ACCOUNTS:-10}
-      NODE_ENV: production
+      NODE_ENV: ${NODE_ENV:-production}
       PORT: 3000
       PCCC_DATA_DIR: /app/data
     ports:

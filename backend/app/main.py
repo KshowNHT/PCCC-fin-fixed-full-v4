@@ -731,17 +731,42 @@ def _merge_checklist(ai_checklist: Optional[List[dict]], deterministic_checklist
 
     det_by_stt = {d["stt"]: d for d in deterministic_checklist}
 
+    # FIX (rà soát theo ảnh chụp người dùng gửi — "BẤT ĐỒNG BỘ KẾT LUẬN"):
+    # đã vá trực tiếp trường hợp cụ thể (mục 12 cho karaoke) trong
+    # rules_engine.py, nhưng đó chỉ là 1 trường hợp CỤ THỂ đã biết — theo
+    # yêu cầu rà soát "hết các trường hợp tương tự CÓ THỂ xảy ra", cần thêm
+    # 1 lớp phòng vệ CHUNG ở đây: nếu note do AI trả về (dùng ngôn ngữ tự
+    # do, không kiểm soát được hết mọi tổ hợp công năng/hạng mục) khẳng định
+    # "bắt buộc" cho đúng hạng mục đó, nhưng result deterministic lại là
+    # "Không bắt buộc" — đây LUÔN là mâu thuẫn ngữ nghĩa trực tiếp giữa 2
+    # cột cùng hiển thị cho người dùng, bất kể nguyên nhân là công năng nào
+    # chưa được rules_engine.py tính đến. Trường hợp này KHÔNG dùng note AI
+    # (dù ai_checklist hợp lệ) — fallback về note deterministic, vốn LUÔN
+    # tự nhất quán với chính result của nó.
+    _CONTRADICTION_MARKER = "bắt buộc"
+
     merged = []
     for t in STANDARDS_CHECKLIST_TEMPLATE:
         det = det_by_stt.get(t["stt"], {})
+        det_result = det.get("result") or "Cần xem xét"
         ai_item = ai_by_stt.get(t["stt"])
         ai_note = (ai_item or {}).get("note")
+        ai_note = ai_note.strip() if isinstance(ai_note, str) and ai_note.strip() else None
+
+        if ai_note and det_result == "Không bắt buộc" and _CONTRADICTION_MARKER in ai_note.lower():
+            logger.warning(
+                "Bỏ qua note AI mâu thuẫn với result tại mục %s (result='Không bắt buộc' nhưng note chứa "
+                "'bắt buộc') — fallback về note deterministic để tránh bất đồng bộ hiển thị cho người dùng.",
+                t["stt"],
+            )
+            ai_note = None
+
         merged.append(
             {
                 "stt": t["stt"], "category": t["criteria"], "criteria": t["criteria"],
                 "requirement": t["requirement"],
-                "result": det.get("result") or "Cần xem xét",  # LUÔN deterministic, không cho AI ghi đè
-                "note": (ai_note.strip() if isinstance(ai_note, str) and ai_note.strip() else None)
+                "result": det_result,  # LUÔN deterministic, không cho AI ghi đè
+                "note": ai_note
                 or det.get("note")
                 or f"Chưa đủ thông tin rà soát cụ thể. Vui lòng trao đổi thêm về thông số {t['criteria'].lower()} của công trình.",
                 "reference": t["reference"],

@@ -181,7 +181,15 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
             note = "Yêu cầu khoảng cách an toàn đến nhà lân cận tối thiểu 8m (Bậc III) hoặc 6m (Tường đặc chống cháy REI 45)."
         elif stt == 4:
             result = "Khuyến nghị mạnh"
-            note = "Gian kinh doanh thương mại tại tầng 1 phải ngăn cách hoàn toàn bằng tường ngăn cháy EI 45 và cửa chống cháy tự đóng EI 30."
+            # FIX (rà soát theo ảnh chụp người dùng gửi — "bất đồng bộ kết
+            # luận"): trước đây note dùng từ "phải" (ngữ nghĩa bắt buộc tuyệt
+            # đối) trong khi result chỉ là "Khuyến nghị mạnh" — mâu thuẫn
+            # ngôn từ giữa 2 cột cùng hiển thị cho 1 hạng mục. Hệ thống KHÔNG
+            # thu thập đủ dữ liệu đầu vào (có/không có tường ngăn cháy EI 45
+            # thật) để khẳng định "Không đạt", nên giữ nguyên result ở mức
+            # khuyến nghị, chỉ đổi lại NGÔN TỪ của note cho khớp đúng mức độ
+            # (không còn dùng "phải" — đổi sang "nên"/"khuyến nghị").
+            note = "Khuyến nghị gian kinh doanh thương mại tại tầng 1 nên ngăn cách hoàn toàn bằng tường ngăn cháy EI 45 và cửa chống cháy tự đóng EI 30."
         elif stt == 5:
             result = "Cần đo đạc"
             note = "Đo đạc kiểm tra chiều rộng thông thủy bản thang bộ tối thiểu đạt 1.05m và chiều rộng chiếu nghỉ."
@@ -190,10 +198,14 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
             note = "Cửa lối ra thoát nạn tầng 1 mở ra hướng thoát nạn, chiều rộng thông thủy >= 0.9m. Không để kho hàng tại sảnh thoát."
         elif stt == 7:
             result = "Khuyến nghị mạnh"
-            note = "Yêu cầu lắp dọc đường thoát lối đi, chiếu nghỉ cầu thang bằng đèn EXIT và chiếu sáng sự cố thời lượng cứu hộ >= 2h."
+            # FIX (cùng loại lỗi với mục 4): note trước đây dùng "Yêu cầu"
+            # (ngữ nghĩa bắt buộc) trong khi result là "Khuyến nghị mạnh".
+            note = "Khuyến nghị lắp dọc đường thoát lối đi, chiếu nghỉ cầu thang bằng đèn EXIT và chiếu sáng sự cố thời lượng cứu hộ >= 2h."
         elif stt == 8:
             result = "Khuyến nghị mạnh"
-            note = "Bắt buộc trang bị bình bột chữa cháy xách tay ABC >= 4kg (mỗi tầng tối thiểu 1 bình; tầng kinh doanh tối thiểu 2 bình)."
+            # FIX (cùng loại lỗi với mục 4): note trước đây dùng "Bắt buộc"
+            # trong khi result là "Khuyến nghị mạnh" — mâu thuẫn ngôn từ.
+            note = "Khuyến nghị mạnh trang bị bình bột chữa cháy xách tay ABC >= 4kg (mỗi tầng tối thiểu 1 bình; tầng kinh doanh tối thiểu 2 bình)."
         elif stt == 9:
             # FIX B12: karaoke/vũ trường bắt buộc báo cháy tự động ở mọi quy mô
             # (không chỉ từ 7 tầng như nhóm nhà hỗn hợp) do đặc thù đông người,
@@ -218,19 +230,54 @@ def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
                 else "Nên ưu tiên hệ thống báo cháy tự động tập trung."
             )
         elif stt == 11:
-            is_volume_required = (floor_area * floors) >= 5000 or height > 12
+            # FIX (rà soát theo ảnh chụp người dùng gửi — cùng loại lỗi với
+            # mục 12 bên dưới, chủ động vá trước khi phát sinh ở công trình
+            # karaoke quy mô nhỏ hơn): trước đây CHỈ xét theo chiều cao/khối
+            # tích, không có nhánh riêng cho karaoke/vũ trường — trong khi
+            # nhóm này luôn bắt buộc trang bị hệ thống chữa cháy chủ động
+            # theo Thông tư 147/2020/TT-BCA bất kể quy mô, giống logic đã áp
+            # dụng cho mục 9 (báo cháy) và mục 12 (sprinkler).
+            is_volume_required = (floor_area * floors) >= 5000 or height > 12 or category == "karaoke_entertainment"
             result = "Không đạt" if is_volume_required else "Khuyến nghị"
             note = (
-                f"Chiều cao {height}m hoặc khối tích lớn yêu cầu thiết kế hệ thống họng nước chữa cháy trong nhà kết nối DN50."
-                if is_volume_required
-                else "Dưới ngưỡng bắt buộc trang bị họng nước vòi rồng. Khuyên lắp vòi mềm hoặc bình khí dự phòng phụ."
+                "Karaoke/vũ trường BẮT BUỘC trang bị hệ thống họng nước chữa cháy trong nhà bất kể quy mô, theo "
+                "quy định riêng cho cơ sở kinh doanh dịch vụ karaoke tại Thông tư 147/2020/TT-BCA."
+                if category == "karaoke_entertainment"
+                else (
+                    f"Chiều cao {height}m hoặc khối tích lớn yêu cầu thiết kế hệ thống họng nước chữa cháy trong nhà kết nối DN50."
+                    if is_volume_required
+                    else "Dưới ngưỡng bắt buộc trang bị họng nước vòi rồng. Khuyên lắp vòi mềm hoặc bình khí dự phòng phụ."
+                )
             )
         elif stt == 12:
-            result = "Không đạt" if pccc_height >= 30 else "Không bắt buộc"
+            # FIX (lỗi trong ảnh chụp người dùng gửi — "BẤT ĐỒNG BỘ KẾT
+            # LUẬN"): trước đây CHỈ xét pccc_height >= 30m, không có nhánh
+            # riêng cho karaoke/vũ trường. Với công trình karaoke 5 tầng,
+            # cao 18m (< 30m), hệ thống kết luận "Không bắt buộc" — NHƯNG
+            # chính AI (Gemini) lại trả về note "Bắt buộc trang bị Sprinkler
+            # cho toàn bộ phòng hát karaoke theo Thông tư 147/2020/TT-BCA"
+            # (đúng quy định thật — karaoke có ngưỡng bắt buộc sprinkler
+            # RIÊNG, thấp hơn hẳn ngưỡng 30m áp dụng cho nhà hỗn hợp thông
+            # thường). Vì fix B06 trước đó luôn ƯU TIÊN dùng note của AI khi
+            # hợp lệ (để giữ phân tích ngữ cảnh phong phú), nhưng 'result'
+            # vẫn chỉ tính theo công thức cũ — 2 cột hiển thị cùng 1 hạng
+            # mục nhưng dữ liệu đến từ 2 nguồn khác nhau, không đồng bộ.
+            # Sửa: thêm nhánh category giống hệt mục 9/11, để RESULT (nguồn
+            # deterministic, không đổi) khớp đúng với NỘI DUNG note mà AI
+            # vốn đã trả lời đúng — loại bỏ mâu thuẫn tận gốc, không chỉ che
+            # triệu chứng.
+            requires_sprinkler = pccc_height >= 30 or category == "karaoke_entertainment"
+            result = "Không đạt" if requires_sprinkler else "Không bắt buộc"
             note = (
-                "Bắt buộc trang bị hệ thống đầu phun chữa cháy sprinkler tự động khi chiều cao thiết kế PCCC >= 30m."
-                if pccc_height >= 30
-                else "Không bắt buộc sprinkler tự động theo chiều cao (dưới 30m). Có thể trang bị tự nguyện tại tầng kinh doanh."
+                "Karaoke/vũ trường BẮT BUỘC trang bị hệ thống chữa cháy tự động Sprinkler cho toàn bộ các phòng "
+                "hát/phòng kinh doanh bất kể chiều cao công trình, theo quy định riêng tại Thông tư 147/2020/TT-BCA "
+                "(không áp dụng ngưỡng 30m như nhà hỗn hợp thông thường)."
+                if category == "karaoke_entertainment"
+                else (
+                    "Bắt buộc trang bị hệ thống đầu phun chữa cháy sprinkler tự động khi chiều cao thiết kế PCCC >= 30m."
+                    if pccc_height >= 30
+                    else "Không bắt buộc sprinkler tự động theo chiều cao (dưới 30m). Có thể trang bị tự nguyện tại tầng kinh doanh."
+                )
             )
         elif stt == 13:
             result = "Cần xem xét"

@@ -17,8 +17,8 @@ COPY alembic.ini entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 COPY data ./data
 RUN mkdir -p /app/fonts \
-    && cp /app/data/Roboto-Regular.ttf /app/fonts/Roboto-Regular.ttf \
-    && cp /app/data/Roboto-Medium.ttf /app/fonts/Roboto-Medium.ttf
+    && curl -fL "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Regular.ttf" -o /app/fonts/Roboto-Regular.ttf \
+    && curl -fL "https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.66/fonts/Roboto/Roboto-Medium.ttf" -o /app/fonts/Roboto-Medium.ttf
 
 # SECURITY HARDENING (audit \brutal \10x): trước đây container chạy bằng
 # root mặc định — nếu có lỗ hổng RCE trong dependency (Python/thư viện),

@@ -4,14 +4,20 @@ Theo kế hoạch Ngày 1: "Khởi tạo FastAPI, kết nối PostgreSQL."
 """
 import os
 from typing import AsyncGenerator
-
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
 
-from app.config import DATABASE_URL
+connect_args = {"timeout": 10, "command_timeout": 90}
+if DATABASE_URL.startswith("postgresql+asyncpg://"):
+    connect_args["ssl"] = True
 
-_options = {"connect_args": {"timeout": 10, "command_timeout": 90}, "pool_timeout": 10, "pool_size": 5, "max_overflow": 5} if DATABASE_URL.startswith("postgresql") else {}
-engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True, **_options)
+_options = {
+    "connect_args": connect_args,
+    "pool_timeout": 10,
+    "pool_size": 5,
+    "max_overflow": 5,
+} if DATABASE_URL.startswith("postgresql") else {}
+
+engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True, **_options)engine = create_async_engine(DATABASE_URL, echo=False, pool_pre_ping=True, **_options)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 

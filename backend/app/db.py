@@ -10,7 +10,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 from app.config import DATABASE_URL
 
-connect_args = {"timeout": 10, "command_timeout": 90, "ssl": False}
+connect_args = {"timeout": 10, "command_timeout": 90, "ssl": True}
 if DATABASE_URL.startswith("postgresql+asyncpg://"):
     connect_args["ssl"] = False
 

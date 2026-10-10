@@ -16,7 +16,9 @@ COPY migrations ./migrations
 COPY alembic.ini entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 COPY data ./data
-COPY data/Roboto-Regular.ttf data/Roboto-Medium.ttf ./fonts/
+RUN mkdir -p /app/fonts \
+    && cp /app/data/Roboto-Regular.ttf /app/fonts/Roboto-Regular.ttf \
+    && cp /app/data/Roboto-Medium.ttf /app/fonts/Roboto-Medium.ttf
 
 # SECURITY HARDENING (audit \brutal \10x): trước đây container chạy bằng
 # root mặc định — nếu có lỗ hổng RCE trong dependency (Python/thư viện),

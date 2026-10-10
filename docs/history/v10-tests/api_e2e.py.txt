@@ -1,0 +1,139 @@
+"""Kiểm thử đầu-cuối qua API THẬT (cần backend + PostgreSQL đang chạy).
+
+Dùng:  API=http://127.0.0.1:8000 ADMIN_USER=admin ADMIN_PASS=... python3 tests/api_e2e.py
+
+Kiểm tra: (1) 43 kịch bản chạy lại qua endpoint PUT /project; (2) hồ sơ lưu từ
+phiên bản cũ (có lý do SAI trong DB) được tự đối chiếu lại khi đọc; (3) chat
+dự phòng trả đúng căn cứ; (4) file Word xuất ra có tiêu đề/lý do đúng; (5) dữ
+liệu không hợp lệ bị chặn 422; (6) tiêm dữ liệu giả vào export bị bỏ qua.
+"""
+import io
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from tests.test_appraisal_scenarios import CASES  # noqa: E402
+
+API = os.environ.get("API", "http://127.0.0.1:9910")
+USER = os.environ.get("ADMIN_USER", "admin")
+PASS = os.environ.get("ADMIN_PASS", "E2eAdminPass123!")
+errors = []
+
+
+def call(method, path, body=None, token=None, raw=False):
+    req = urllib.request.Request(API + path, method=method, data=json.dumps(body).encode() if body is not None else None)
+    req.add_header("Content-Type", "application/json")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = r.read()
+            return r.status, (data if raw else json.loads(data or b"{}"))
+    except urllib.error.HTTPError as e:
+        data = e.read()
+        try:
+            return e.code, json.loads(data)
+        except Exception:  # noqa: BLE001
+            return e.code, data
+
+
+def check(cond, msg):
+    print(("   ok  : " if cond else "   FAIL: ") + msg)
+    if not cond:
+        errors.append(msg)
+
+
+status, tok = call("POST", "/api/auth/login-json", {"username": USER, "password": PASS})
+assert status == 200, tok
+T = tok["access_token"]
+
+print(f"### 1. {len(CASES)} kịch bản qua PUT /api/sessions/{{id}}/project")
+FIELDS = ("type", "floors", "totalFloorArea", "floorArea", "pcccHeight", "height", "fireRating", "commercialDetails", "floorFunctions")
+for cid, desc, project, exp in CASES:
+    if cid == "C29":
+        continue  # chuỗi OCR: kiểm tra riêng ở mục 5 (API phải chặn 422)
+    s, sess = call("POST", "/api/sessions", {}, T)
+    sid = sess["id"]
+    body = {k: project[k] for k in FIELDS if k in project and project[k] is not None}
+    s, res = call("PUT", f"/api/sessions/{sid}/project?appraise=false", body, T)
+    if s != 200:
+        check(False, f"{cid}: API trả {s} {str(res)[:120]}")
+        continue
+    b = res["appraisalBasis"]
+    by = {c["stt"]: c["result"] for c in res["checklist"]}
+    # Hồ sơ mới qua API luôn mang loại công trình mặc định (nhà ở kết hợp kinh doanh),
+    # nên ca "hồ sơ rỗng" (C28) thuộc nhóm đó thay vì "chưa xác định" như khi gọi engine với dict rỗng.
+    exp_category = "mixed_residential" if cid == "C28" else exp["category"]
+    ok = (b["status"] == exp["status"] and b["category"] == exp_category and set(b["triggeredBy"]) == exp["triggered"]
+          and all(by[k] == v for k, v in exp.get("items", {}).items())
+          and res["isSubjectToAppraisal"] == (exp["status"] == "required")
+          and res["appraisalReason"] == b["summary"])
+    check(ok, f"{cid} {desc[:70]}")
+
+print("\n### 2. Hồ sơ lưu từ BẢN CŨ (lý do sai trong DB) tự chữa lành khi đọc")
+s, sess = call("POST", "/api/sessions", {}, T)
+sid = sess["id"]
+call("PUT", f"/api/sessions/{sid}/project?appraise=false", {"type": "Cơ sở kinh doanh Karaoke, Vũ trường", "floors": 5, "totalFloorArea": 500, "floorArea": 100, "pcccHeight": 18, "fireRating": "Bậc III"}, T)
+import subprocess  # noqa: E402
+stale_checklist = json.dumps([{"stt": i, "category": "x", "criteria": "x", "requirement": "x", "note": "note cũ", "result": "Không bắt buộc" if i == 12 else "Đạt", "reference": "x"} for i in range(1, 18)])
+stale_reason = "Hiện tại, công trình của bạn ĐẠT HOẶC VƯỢT một trong các ngưỡng pháp lý (lý do SAI từ bản cũ)"
+sql = ("UPDATE chat_sessions SET is_subject_to_appraisal = true, appraisal_reason = %s, checklist = %s::json, warnings = %s::json WHERE id = %s;")
+env = dict(os.environ, PGPASSWORD=os.environ.get("PGPASSWORD", "ApiE2eTest#2026"))
+subprocess.run(["psql", "-h", "127.0.0.1", "-U", "pccc_app", "-d", os.environ.get("PGDB", "pccc_e2e"), "-q", "-c",
+                "UPDATE chat_sessions SET is_subject_to_appraisal = true, appraisal_reason = '" + stale_reason + "', checklist = '" + stale_checklist.replace("'", "''") + "'::json, warnings = '[\"Thiết kế quy mô lớn bậc chịu lửa và lối thoát hiểm cần có chữ ký tư vấn được cấp chứng chỉ hành nghề.\"]'::json WHERE id = '" + sid + "';"],
+               check=True, env=env)
+s, lst = call("GET", "/api/sessions", None, T)
+mine = next(x for x in lst if x["id"] == sid)
+by = {c["stt"]: c["result"] for c in mine["checklist"]}
+check("ĐẠT HOẶC VƯỢT" not in mine["appraisalReason"], "lý do sai cũ KHÔNG còn được trả về")
+check(mine["appraisalReason"] == mine["appraisalBasis"]["summary"], "lý do = căn cứ mới tính lại")
+check(by[12] == "Không đạt", "mục 12 'Không bắt buộc' cũ đã được sửa thành 'Không đạt' (karaoke)")
+check(by[1] == "Không đạt" and by[2] == "Không đạt", "kết quả mục 1, 2 được tính lại (không còn 'Đạt' giả)")
+check(not any(w.startswith("Thiết kế quy mô lớn") for w in mine["warnings"]), "cảnh báo 'quy mô lớn' sai của bản cũ đã bị loại")
+check(not any(c["note"] == "note cũ" for c in mine["checklist"] if c["stt"] in (1, 2, 9, 10, 11, 12)), "ghi chú cũ của mục phụ thuộc số liệu được thay bằng ghi chú đúng")
+
+print("\n### 3. Chat (không có GEMINI_API_KEY -> chế độ dự phòng)")
+s, chat = call("POST", "/api/chat", {"sessionId": sid, "messageText": "kiểm tra hồ sơ"}, T)
+check(s == 200 and "appraisalBasis" in chat, "chat trả kèm appraisalBasis")
+check(chat["appraisalBasis"]["category"] == "karaoke_entertainment", "căn cứ chat = karaoke")
+check("bất kể quy mô" in chat["reply"] and "ĐẠT HOẶC VƯỢT" not in chat["reply"], "reply nêu đúng lý do, không nói vượt ngưỡng")
+
+print("\n### 4. File Word xuất ra")
+from docx import Document  # noqa: E402
+
+
+def docx_text(sid_):
+    s_, data = call("POST", "/api/report/export", {"sessionId": sid_}, T, raw=True)
+    assert s_ == 200
+    d = Document(io.BytesIO(data))
+    parts = [p.text for p in d.paragraphs]
+    for t in d.tables:
+        for row in t.rows:
+            parts += [c.text for c in row.cells]
+    return "\n".join(parts)
+
+
+txt = docx_text(sid)
+check("THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BẮT BUỘC" in txt, "karaoke: tiêu đề BẮT BUỘC")
+check("bất kể quy mô" in txt and "Căn cứ áp dụng" in txt and "Karaoke / vũ trường / quán bar" in txt, "karaoke: có lý do + căn cứ áp dụng")
+check("ĐẠT HOẶC VƯỢT" not in txt, "karaoke: Word không có câu 'ĐẠT HOẶC VƯỢT'")
+s, sess2 = call("POST", "/api/sessions", {}, T)
+call("PUT", f"/api/sessions/{sess2['id']}/project?appraise=false", {"type": "Nhà ở riêng lẻ kết hợp kinh doanh", "floors": 5, "floorArea": 100, "pcccHeight": 18}, T)
+txt2 = docx_text(sess2["id"])
+check("CHƯA ĐỦ THÔNG SỐ" in txt2 and "KHÔNG THUỘC DIỆN THẨM DUYỆT" not in txt2, "thiếu diện tích: Word in 'CHƯA ĐỦ THÔNG SỐ', không in 'KHÔNG THUỘC DIỆN'")
+
+print("\n### 5. Dữ liệu không hợp lệ / giả mạo")
+s, _ = call("PUT", f"/api/sessions/{sid}/project?appraise=false", {"floors": "5 tầng"}, T)
+check(s == 422, "số tầng dạng chuỗi bị chặn 422")
+s, _ = call("PUT", f"/api/sessions/{sid}/project?appraise=false", {"floors": -1}, T)
+check(s == 422, "số tầng âm bị chặn 422")
+s, rj = call("POST", "/api/report/export-json", {"sessionId": sid, "conclusions": {"isAppraisalRequired": False, "reason": "GIẢ MẠO"}, "checklist": [{"stt": 1}]}, T)
+check(rj["conclusions"]["reason"] != "GIẢ MẠO" and len(rj["checklist"]) == 17, "kết luận/checklist giả mạo trong body bị bỏ qua")
+s, rj2 = call("POST", "/api/report/export-json", {"projectInfo": {"type": "Cơ sở kinh doanh Karaoke, Vũ trường", "floors": 5, "totalFloorArea": 500}, "conclusions": {"isAppraisalRequired": False, "status": "not_required", "reason": "GIẢ MẠO"}}, T)
+check(rj2["conclusions"]["status"] == "required" and rj2["conclusions"]["reason"] != "GIẢ MẠO", "nhánh không sessionId: kết luận vẫn được tính lại, không tin client")
+
+print(f"\nTỔNG LỖI E2E: {len(errors)}")
+sys.exit(1 if errors else 0)

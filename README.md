@@ -1,205 +1,140 @@
-# PCCC Compliance AI v2 — Đầy đủ theo Kế hoạch 33 ngày (Self-hosted)
+# PCCC v11.3 — nhà xưởng và hồ sơ nhiều hạng mục, kiểm duyệt tường minh
 
-> ⚠️ **Cập nhật quan trọng:** file Docker Compose thật đang được dùng là
-> **`compose.yaml`** ở thư mục gốc (chạy qua `run-docker.bat`/
-> `stop-docker.bat`/`logs-docker.bat`) — KHÔNG PHẢI `docker-compose.yml`
-> được nhắc tới trong tài liệu bên dưới (file đó đã lỗi thời, gây lệch cấu
-> hình bảo mật, và đã bị xoá). Xem `Bao_Cao_Fix_QA_Lan_2.md` mục 12 để biết
-> chi tiết. Toàn bộ nội dung README này giữ nguyên cho mục đích tham khảo
-> kiến trúc/gap-analysis, nhưng khi làm theo hướng dẫn Docker, luôn dùng
-> `compose.yaml`.
+Ứng dụng React + FastAPI + PostgreSQL hỗ trợ quản lý hồ sơ, đọc lại kết quả rà soát,
+OCR bản vẽ và xuất Word/PDF/JSON. Đây là công cụ **sàng lọc và hỗ trợ rà soát**;
+không tự xác nhận thiết kế đạt/không đạt, không thay thế thẩm định hay nghiệm thu.
 
-Bản dựng lại toàn diện sau khi đối chiếu 2 file kế hoạch
-(`Ke_hoach_Models_Chatbot_PCCC.md`, `_ChiTiet.md`) với thiết kế migration
-Python trước đó. Mục tiêu: đáp ứng **đầy đủ** các "Model" và tính năng cam
-kết trong hợp đồng, không chỉ port 1:1 code Node.js cũ.
+## Triển khai production
 
-## 1. Gap Analysis — Trước khi sửa
+Cần VPS Linux hỗ trợ Docker Engine + Docker Compose v2, khuyến nghị 4 GB RAM,
+2 vCPU trở lên, domain đã trỏ A/AAAA đến VPS và cổng 80/443 được mở. Hosting
+chỉ phục vụ HTML/PHP hoặc chỉ cho upload `dist/` không chạy được toàn bộ hệ thống.
+Phải cho phép máy chủ truy cập registry Docker, ACME và Google nếu dùng Gemini.
 
-| # | Yêu cầu kế hoạch | Trạng thái trước | Trạng thái sau (bản này) |
-|---|---|---|---|
-| 1 | PostgreSQL + FastAPI (Ngày 1) | ❌ JSON file | ✅ PostgreSQL thật qua SQLAlchemy async, đã cài đặt + test bằng psql thật |
-| 2 | User Model + JWT Auth (Ngày 1) | ❌ `admin/admin` hardcode phía client | ✅ Bcrypt hash + JWT, bootstrap admin đầu tiên, giới hạn `MAX_STAFF_ACCOUNTS` |
-| 3 | Document Model (Ngày 2) | ⚠️ JSON file | ✅ Bảng `documents` PostgreSQL, dùng chung toàn tổ chức |
-| 4 | ChatSession & ChatMessage Model (Ngày 3) | ⚠️ JSON lồng nhau | ✅ 2 bảng quan hệ riêng, cascade delete |
-| 5 | RAG Legal QA (Ngày 5-8) | ✅ Có (keyword-based) | ✅ Giữ nguyên, đã verify logic không đổi |
-| 6 | ProjectData Model (Ngày 9-10) | ❌ Không có, chỉ nhúng trong session | ✅ Bảng `project_data` riêng, quan hệ 1-1 với session |
-| 7 | InspectionLog / Nhật ký kiểm tra (Ngày 9-11) | ❌ Không có | ✅ Bảng `inspection_logs`, tự ghi mỗi lần chạy thẩm định (chat/manual/OCR), có UI xem |
-| 8 | Vision/OCR đọc bản vẽ (Ngày 12-17) | ❌ Không có | ✅ `ocr_vision.py` — PDF/PNG → Gemini Vision → tự điền form (xem ghi chú §4) |
-| 9 | Rules Engine / Decision Tree (Ngày 18-21) | ⚠️ Có nhưng lẫn trong `appraisal.py` | ✅ Tách riêng `rules_engine.py`, giữ nguyên 100% logic đã test |
-| 10 | Xuất báo cáo PDF/Word/JSON (Ngày 22-25) | ⚠️ Thiếu JSON | ✅ Thêm `/api/report/export-json` |
-| 11 | Docker Compose Postgres+Backend (Ngày 29) | ❌ Chỉ có backend | ✅ 3 service: postgres, backend, frontend |
-| 12 | Dockerfile Frontend Nginx (Ngày 29) | ❌ Không có | ✅ Multi-stage build + Nginx |
-| 13 | Reverse Proxy Nginx (Ngày 30) | ❌ Không có | ✅ `nginx.conf` proxy `/api`, `/data` sang backend + SPA fallback |
-
-## 2. Kiến trúc
-
-```
-final_v2/
-├── docker-compose.yml       # postgres + backend + frontend, 1 lệnh chạy toàn bộ
-├── .env.example             # biến môi trường bắt buộc (JWT_SECRET, mật khẩu...)
-├── backend/                 # FastAPI + PostgreSQL + JWT + OCR + Rules Engine
-│   ├── app/
-│   │   ├── main.py            # toàn bộ route, đã bảo vệ bằng JWT
-│   │   ├── db.py, db_models.py # SQLAlchemy async: User/Document/ChatSession/
-│   │   │                        # ChatMessage/ProjectData/InspectionLog
-│   │   ├── auth.py, schemas_auth.py  # bcrypt + JWT + dependency get_current_user
-│   │   ├── rules_engine.py    # Decision Tree 17 mục checklist (đổi tên từ appraisal.py)
-│   │   ├── ocr_vision.py      # Vision/OCR đọc bản vẽ (MỚI)
-│   │   ├── gemini_client.py   # gọi Gemini, retry/failover
-│   │   ├── docx_report.py, pdf_report.py  # xuất báo cáo
-│   │   ├── seed.py            # khởi tạo admin mặc định + 18 tài liệu pháp lý
-│   │   └── ...
-│   ├── requirements.txt
-│   ├── Dockerfile             # + poppler-utils cho OCR
-│   └── .env.example
-└── frontend/                 # React — UI mới: đăng nhập thật, OCR upload, nhật ký kiểm tra
-    ├── src/
-    │   ├── lib/api.ts           # MỚI — JWT client, thay hoàn toàn fetch() trần
-    │   ├── components/Login.tsx        # Viết lại — gọi API thật
-    │   ├── components/BlueprintUpload.tsx   # MỚI — OCR upload UI
-    │   ├── components/InspectionLogPanel.tsx # MỚI — bảng nhật ký kiểm tra
-    │   └── App.tsx               # Viết lại — auth thật, apiFetch, 2 modal mới
-    ├── Dockerfile              # MỚI — Nginx multi-stage
-    ├── nginx.conf              # MỚI — reverse proxy + SPA fallback
-    └── package.json
-```
-
-## 3. Bảng Model ↔ Bảng dữ liệu (đối chiếu kế hoạch)
-
-| Tên Model trong kế hoạch | Bảng PostgreSQL | File |
-|---|---|---|
-| User Model | `users` | `db_models.py::User` |
-| Document Model | `documents` | `db_models.py::Document` |
-| ChatSession Model | `chat_sessions` | `db_models.py::ChatSession` |
-| ChatMessage Model | `chat_messages` | `db_models.py::ChatMessage` |
-| ProjectData Model | `project_data` | `db_models.py::ProjectData` |
-| InspectionLog Model | `inspection_logs` | `db_models.py::InspectionLog` |
-
-## 4. Ghi chú kỹ thuật quan trọng: OCR dùng Gemini, không dùng GPT-4o
-
-Kế hoạch gốc ghi "Vision/OCR Extraction Model (GPT-4o)". Toàn bộ phần còn
-lại của hệ thống (chatbot, RAG, appraisal) đã dùng **Gemini** làm nhà cung
-cấp AI duy nhất kể từ code gốc `server.ts`. `ocr_vision.py` dùng Gemini
-multimodal (cùng SDK, cùng API key, cùng chi phí vận hành đã có) để tránh
-phải tích hợp thêm nhà cung cấp AI thứ hai chỉ cho một tính năng. Về chức
-năng (đọc ảnh bản vẽ kỹ thuật → JSON có cấu trúc) hai model tương đương.
-
-Nếu khách hàng yêu cầu bám đúng GPT-4o Vision theo văn bản hợp đồng, chỉ
-cần sửa hàm `_call_vision_model()` trong `ocr_vision.py` để gọi
-`openai.chat.completions.create(model="gpt-4o", ...)` — toàn bộ phần
-rasterize PDF (`pdf2image`) và pipeline autofill giữ nguyên không đổi.
-
-## 5. Testing đã thực hiện (không phải chỉ viết code suông)
-
-Đã cài **PostgreSQL 16 thật** trong môi trường sandbox (không mock), chạy
-`uvicorn` thật, và test bằng `curl` + `psql`:
-
-| Test | Kết quả |
-|---|---|
-| Đăng ký user đầu tiên → tự thành admin | ✅ |
-| Đăng ký user thứ 2 qua endpoint mở → bị chặn 403 | ✅ |
-| Login sai mật khẩu → 401 | ✅ |
-| Login đúng → nhận JWT hợp lệ | ✅ |
-| Gọi `/api/documents` không token → 401 | ✅ |
-| Admin tạo tài khoản nhân viên → 201 | ✅ |
-| Staff xem `/api/sessions` → chỉ thấy hồ sơ của mình (0 hồ sơ của admin) | ✅ |
-| Staff xoá session của admin → 403 | ✅ |
-| Staff reset tài liệu pháp lý (admin-only) → 403 | ✅ |
-| Tạo session → lưu đúng PostgreSQL, `evaluate_appraisal` đúng logic gốc | ✅ |
-| Chat 2 lượt liên tiếp → đúng số tin nhắn tích luỹ (1→3→5) | ✅ (phát hiện & sửa 1 bug SQLAlchemy cache) |
-| Cập nhật project, xoá session → cascade delete xoá sạch messages/project_data/logs | ✅ (verify bằng `psql COUNT(*)`) |
-| Export DOCX / PDF / JSON | ✅ cả 3 định dạng |
-| OCR endpoint không token → 401; có token nhưng thiếu `GEMINI_API_KEY` → lỗi 500 sạch (không crash) | ✅ |
-| **Frontend**: `tsc --noEmit` | ✅ 0 lỗi (phát hiện & sửa thiếu `vite-env.d.ts` — lỗi có sẵn từ bản gốc) |
-| **Frontend**: `npm run build` | ✅ build thành công, 654KB JS (gzip 190KB) |
-| **Full-stack**: backend v2 phục vụ `frontend/dist` cùng origin, login qua đúng luồng browser thật | ✅ |
-
-**Chưa test được** (giới hạn môi trường sandbox):
-- Docker/`docker-compose up` thật (không có Docker daemon trong sandbox) —
-  đã verify từng thành phần tương đương thủ công (Postgres service, uvicorn,
-  Nginx static+proxy pattern là chuẩn phổ biến, rủi ro thấp)
-- Gọi Gemini Vision thật cho OCR (không có `GEMINI_API_KEY`) — đã verify
-  code path và graceful error handling, chưa verify độ chính xác đọc bản vẽ
-  thật ngoài đời
-
-## 6. Cách chạy
-
-### Docker (khuyến nghị, đúng kế hoạch Ngày 29-30)
 ```bash
-cp .env.example .env
-# Điền GEMINI_API_KEY, JWT_SECRET (openssl rand -hex 32), mật khẩu Postgres/admin
+python3 scripts/configure_env.py --domain pccc.tenmien.vn --email ops@tenmien.vn
+# Mở .env để bổ sung GEMINI_API_KEY; không đưa file này vào Git.
+docker compose config --quiet
 docker compose up -d --build
+docker compose ps
+curl -f https://pccc.tenmien.vn/api/ready
 ```
-- Frontend: `http://localhost` (Nginx, reverse-proxy `/api` → backend)
-- Backend API trực tiếp: `http://localhost:3000`
-- Đăng nhập lần đầu bằng `PCCC_ADMIN_USERNAME` / `PCCC_ADMIN_PASSWORD` đã đặt
-  trong `.env` — **đổi mật khẩu ngay** (chưa có endpoint đổi mật khẩu tự
-  phục vụ, xem "Next Recommendation").
 
-### Chạy dev thủ công (không Docker)
+Đăng nhập bằng `admin` và mật khẩu được sinh trong `.env`. Dùng POST
+`/api/auth/users` với Bearer token admin để tạo nhân viên; đăng ký công khai đã tắt.
+Đổi mật khẩu qua PUT `/api/auth/me/password`; mọi token đã cấp trước đó bị thu hồi.
+Đăng nhập lại sau khi đổi mật khẩu. Giới hạn tài khoản chỉ đếm role `staff`.
+Không nhập API key vào `frontend/.env`: các biến VITE được công khai trong bundle.
+
+Caddy tự cấp và gia hạn TLS. Backend và PostgreSQL không publish port ra host.
+Nginx và Uvicorn chỉ tin proxy trong mạng Docker `172.28.76.0/24`. Nếu subnet
+trùng mạng VPS, phải sửa đồng thời `compose.yaml`, `frontend/nginx.conf` và
+`backend/entrypoint.sh`. Không đặt thêm proxy/CDN mà chưa kiểm tra IP client thật
+và rate limit. Khi thay `.env`, chạy lại `docker compose up -d`; khi sửa frontend
+hoặc mã nguồn cần `--build`.
+
+## Luồng nghiệp vụ bắt buộc
+
+Nhập / sửa thông số hoặc áp dụng OCR chỉ lưu **bản nháp**. Khi đang gõ, giao diện
+ẩn kết luận cũ. Bấm **Kiểm duyệt hồ sơ** mới chạy bộ quy tắc đã xác minh và lưu
+kết quả gắn với chính thông số đó. Không tự rà soát khi mở hồ sơ, GET danh sách,
+chat, thay đổi ô nhập hoặc áp dụng OCR. Xuất báo cáo bị chặn cho tới khi có kết
+quả kiểm duyệt phù hợp với bản dữ liệu hiện tại. Sửa lại sẽ phải kiểm duyệt lại.
+
+Nếu không có quy tắc phù hợp đã xác minh, hiển thị **Không tìm thấy quy định phù hợp**
+và giữ trạng thái cần rà soát, không tự tạo ngưỡng, trích dẫn hay chấm đạt/không đạt.
+Thông báo này nói về phạm vi bộ quy tắc trong phần mềm, không khẳng định pháp luật
+không có quy định. Hiện chưa tự chấm đủ 17 hạng mục kỹ thuật; đây là giới hạn
+nghiệp vụ thực tế, không phải cam kết thẩm định toàn diện.
+
+Trong v11.3, Gemini chỉ phục vụ OCR. Kết luận và trả lời pháp lý không dùng nội dung
+LLM tự do. Chat đọc lại kết quả đã kiểm duyệt, hướng dẫn nhập liệu, hoặc thông báo
+chưa tìm thấy quy tắc để trả lời; không sửa thông số bên trái. Tài liệu upload
+được lưu để đọc/đối chiếu, chưa tự chuyển thành quy tắc pháp lý được xác minh.
+`GEMINI_MODELS` mặc định `gemini-3.8-flash`; phải kiểm tra quyền model với key thật.
+OCR lỗi thì nhập tay. Timeout AI 75 giây, proxy 150 giây. Một worker backend;
+khóa ghi và kiểm tra phiên bản hồ sơ thực hiện trong PostgreSQL.
+
+Hai tab cùng sửa: client gửi revision nhận từ server. Bản cũ bị từ chối HTTP 412,
+không tự ghi đè hoặc tự thử lại. Nút **Tải lại hồ sơ** bỏ các chỉnh sửa chưa lưu
+và nạp bản mới nhất. Production bắt buộc revision cho thao tác sửa/xóa/chat/
+kiểm duyệt/OCR ghi trực tiếp và xuất báo cáo; client cũ không gửi sẽ nhận 428.
+Không có push realtime; tải lại hoặc mở lại hồ sơ để thấy thay đổi từ tab khác.
+
+## Cài và chạy kiểm thử
+
+Python 3.12, Node 20 trở lên, npm tương thích package-lock; Poppler cho OCR PDF.
+
 ```bash
-# 1. PostgreSQL
-sudo apt-get install postgresql
-sudo -u postgres createuser pccc_app -P
-sudo -u postgres createdb pccc_db -O pccc_app
-
-# 2. Backend
-cd backend
-cp .env.example .env   # điền DATABASE_URL, JWT_SECRET, GEMINI_API_KEY
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 3000
-
-# 3. Frontend
-cd frontend
-cp .env.example .env   # VITE_API_BASE_URL=http://localhost:3000
-npm install && npm run dev
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r backend/requirements-test.txt
+bash scripts/run_all_tests.sh
 ```
 
-## 7. Remaining Risks / Next Recommendation
+Script dừng khi bất kỳ kiểm tra nào thất bại. 40 ca gốc và các ca bổ sung mặc định dùng
+SQLite tạm để chạy tái lập, AI giả lập; có 3.000 hồ sơ fuzz và 8 fixture React.
+Muốn chạy trên PostgreSQL, tạo database **riêng** `pccc_test`, rồi đặt
+`TEST_DATABASE_URL=postgresql+asyncpg://.../pccc_test`. Bộ test xóa dữ liệu trong
+database này. Không trỏ test vào database khách hàng. Kết quả cụ thể và phạm vi
+kiểm tra mới nhất nằm ở `docs/RA_SOAT_V11_3.md` và `docs/qa/full-suite-v11-3.log`.
 
-1. **Chưa có endpoint đổi mật khẩu** cho user tự phục vụ — nên thêm
-   `PUT /api/auth/me/password` trước khi bàn giao thật.
-2. **Alembic chưa tích hợp** — hiện dùng `Base.metadata.create_all()` khi
-   khởi động (đủ cho MVP/demo). Trước production nên chuyển sang Alembic
-   migrations để kiểm soát thay đổi schema an toàn.
-3. **Vector Store thật chưa có** — RAG hiện vẫn là keyword-matching
-   (`get_rag_context_for_project`), đúng như code gốc. Nếu cần đúng
-   "Nhúng văn bản luật (Vector Store)" theo kế hoạch Ngày 5-6, nên thêm
-   `pgvector` extension + Gemini embeddings — hạ tầng PostgreSQL đã sẵn sàng
-   để mở rộng việc này.
-4. **OCR chưa test với bản vẽ thật** — nên chạy thử với ≥10 bản vẽ mẫu thực
-   tế trước khi cam kết độ chính xác với khách hàng (kế hoạch Ngày 7-8 cam
-   kết >90% độ chính xác trích dẫn/rà soát).
-5. **SSL/TLS chưa cấu hình** — `nginx.conf` hiện chỉ HTTP. Khi có domain
-   thật, thêm Certbot hoặc đặt Caddy/Nginx TLS-termination phía trước.
+## Căn cứ và giới hạn nghiệp vụ
 
-## 8. "Khoá chặn" tài khoản test truy cập DevTools (bổ sung mới)
+Đã đối chiếu Phụ lục III thay thế kèm Nghị định 347/2026/NĐ-CP, hiệu lực
+15/9/2026. Nhà xưởng thuộc sản xuất công nghiệp khác xét mục 9(d) theo hạng
+nguy hiểm cháy/nổ, khối tích và tổng sàn; kho hạng A/B/C xét mục 10. Không lấy
+ngưỡng nhà hỗn hợp cho nhà xưởng. Các phân loại hoặc số liệu chưa rõ vẫn cần
+rà soát thủ công. Chi tiết nguồn và phạm vi: docs/RA_SOAT_V11_3.md.
 
-Tính năng mới: ngăn tài khoản `role="staff"` (cấp cho người xem thử/nghiệm
-thu bên ngoài) mở DevTools trình duyệt để xem/khai thác mã nguồn phía
-client. Tài khoản `admin` luôn được miễn trừ.
+OCR trả danh sách nhà độc lập; nhập/sửa trong phần “hồ sơ nhiều hạng mục”,
+đối chiếu nguồn và xác nhận danh sách đầy đủ trước Kiểm duyệt. Có thể kiểm
+duyệt tất cả hạng mục trong một lần. Không cộng các nhà thành một nhà hỗn hợp,
+không tạo nhà từ dòng tổng hợp. PDF tối đa 24 trang và 25 MB; vượt giới hạn báo
+lỗi yêu cầu tách, không âm thầm bỏ trang. OCR vẫn cần kiểm tra độ chính xác.
 
-**⚠️ Đọc kỹ trước khi bật**: đây là biện pháp răn đe ở tầng trình duyệt,
-**không phải** bảo mật tuyệt đối — không có cách nào 100% ngăn người dùng
-đủ kỹ thuật đọc mã JS chạy trong trình duyệt của chính họ (giới hạn vật lý
-của kiến trúc web). Xem cảnh báo kỹ thuật đầy đủ trong
-`frontend/src/lib/codeProtection.ts`. Toàn bộ logic nghiệp vụ nhạy cảm
-(thẩm định PCCC, xác thực...) vẫn luôn nằm ở backend, không gửi xuống
-client — đây mới là lớp bảo vệ thật sự.
+Ngưỡng quy mô không dùng để chấm 16 hạng mục kỹ thuật còn lại. Chương trình
+chưa thu thập cấu kiện, thiết bị, lối thoát nạn, khoang cháy và điều kiện thiết
+kế đủ để tự chấm đạt/không đạt. Hạng mục dưới ngưỡng có thể vẫn cần thẩm định
+nội dung hệ thống dùng chung theo ghi chú phụ lục; form yêu cầu xác nhận.
 
-**Cách bật**: đặt trong `.env`:
+Tài liệu mặc định là metadata tham khảo, không phải toàn văn đã xác minh.
+Tài liệu custom không tự trở thành căn cứ kết luận. Quản trị viên phải
+kiểm tra hiệu lực, văn bản sửa đổi và độ đầy đủ của tài liệu trước khi nạp.
+Bộ quy tắc chưa bao phủ toàn bộ Phụ lục III, ngoại lệ, dự án cải tạo hay quy
+định chuyển tiếp; cần xác nhận trước khi dùng cho quyết định pháp lý thực tế.
+
+## Kết quả rà soát mới nhất
+
+93 ca: 76 backend, 14 React, 3 migration SQLite; thêm 3.000 hồ sơ fuzz và
+8 fixture kết luận React. Lint/build production đạt. Không có Docker daemon,
+PostgreSQL server, hosting/TLS hoặc key AI khách hàng để nghiệm thu thực tế.
+Xem `docs/RA_SOAT_V11_3.md`; các báo cáo v11/v11.1 là lịch sử, không mô tả
+luồng tự kiểm duyệt của bản hiện hành.
+
+## Nâng cấp từ v10
+
+Sao lưu database và toàn bộ volume file trước. Giữ nguyên tên project Compose
+và volume; đổi thư mục hoặc tên project có thể tạo volume mới, khiến ứng dụng
+trông như mất dữ liệu. Migration `001_v11` tiếp nhận bảng v10 và thêm chỉ mục,
+không xóa bảng; schema thiếu cột sẽ chặn khởi động. Kết quả cũ chưa có dấu xác
+nhận kiểm duyệt mới sẽ trở về bản nháp; hồ sơ và log lịch sử vẫn giữ. Secret JWT nên xoay khi nâng cấp; token v10 sẽ không còn hợp lệ.
+Tài liệu custom và hồ sơ khách hàng được giữ; các tóm tắt pháp lý tự sinh của
+catalog mặc định được đổi thành thông báo chưa xác minh. Kiểm tra bản khôi phục
+trên môi trường riêng trước khi nâng cấp production.
+
+## Sao lưu và vận hành
+
+```bash
+bash scripts/backup.sh
+# Kiểm tra nhật ký và trạng thái sau sao lưu
+docker compose ps
+docker compose logs --tail=100 backend edge
 ```
-VITE_ENABLE_CODE_PROTECTION=true
-```
-rồi build lại: `docker compose up -d --build` (biến này là build-arg của
-Vite, cần build lại image frontend mới có tác dụng — không phải biến runtime).
 
-**Hành vi khi bật** (chỉ áp dụng cho tài khoản staff):
-- Chặn chuột phải (menu ngữ cảnh)
-- Chặn phím tắt mở DevTools/xem mã nguồn/lưu trang (F12, Ctrl+Shift+I/J/C,
-  Ctrl+U, Ctrl+S và tương đương trên macOS)
-- Phát hiện DevTools đang mở (dạng gắn cạnh trình duyệt) → hiện overlay
-  cảnh báo che mờ nội dung, tự đóng lại khi người dùng đóng DevTools (không
-  xoá dữ liệu, không đăng xuất)
-- In cảnh báo chính sách sử dụng trong Console trình duyệt
+Backup dừng backend trong lúc chụp database và file để giữ nhất quán. Cất
+`database.dump`, `files.tar.gz`, `.env` và bản code tương ứng ở nơi có kiểm soát
+truy cập; `.env` phải lưu riêng, script không sao chép mật khẩu vào backup.
+Kiểm tra khôi phục bằng `pg_restore` và giải nén file vào volume của môi trường
+riêng, rồi kiểm tra quyền UID 1001. Không chạy `docker compose down -v` trên dữ
+liệu khách hàng. Xem quy trình chi tiết trong `docs/DEPLOY_VA_NGHIEM_THU.md`.

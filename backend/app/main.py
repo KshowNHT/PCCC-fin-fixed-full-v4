@@ -24,16 +24,23 @@ Tóm tắt các thay đổi chính trong file này:
 - Thêm endpoint tự đổi mật khẩu (trước đây không có, bắt buộc phải có để
   yêu cầu người dùng đổi mật khẩu admin mặc định khi đưa vào production).
 """
+import asyncio
+import hashlib
+import json
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.exc import IntegrityError
+from pydantic import ValidationError
+
 import logging
 import re
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Literal
 from urllib.parse import quote
 
-from fastapi import Body, Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.security import OAuth2PasswordRequestForm
@@ -74,9 +81,10 @@ from app.db_models import ChatMessage, ChatSession, Document, InspectionLog, Pro
 from app.doc_extract import extract_docx, extract_pdf, extract_txt, sanitize_text
 from app.docx_report import generate_pccc_report
 from app.gemini_client import run_deep_llm_appraisal
-from app.ocr_vision import extract_project_data_from_drawing
+from app.ocr_vision import extract_project_data_from_drawing, OCRInputError
 from app.pdf_report import generate_compliance_report_pdf, generate_document_pdf
-from app.rules_engine import evaluate_appraisal
+from app.ai_guard import guard_reply, guard_warnings, sanitize_extracted_info
+from app.rules_engine import DETERMINISTIC_WARNING_PREFIXES, evaluate_appraisal
 from app.schemas_auth import (
     ChangePasswordRequest,
     ChatRequest,
@@ -88,6 +96,7 @@ from app.schemas_auth import (
 from app.schemas_project import ProjectUpdateRequest
 from app.seed import seed_initial_data
 from app.storage import ensure_fonts_exist
+from app.hardening import validate_upload, resolve_stored_file, lock_session
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pccc.main")
@@ -98,7 +107,7 @@ assert_production_secrets_are_safe()
 
 limiter = Limiter(key_func=get_remote_address)
 
-app = FastAPI(title="PCCC Compliance AI API v2")
+app = FastAPI(title="PCCC Screening API v11.3", version="11.3.0", docs_url=None if NODE_ENV == "production" else "/docs", redoc_url=None if NODE_ENV == "production" else "/redoc")
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
@@ -145,7 +154,7 @@ async def _startup() -> None:
 
     await init_db()
     await seed_initial_data()
-    asyncio.create_task(ensure_fonts_exist())
+    await ensure_fonts_exist()
 
 
 def _now_iso() -> str:
@@ -183,11 +192,16 @@ def _generate_safe_storage_path(directory: Path, original_filename: str, allowed
 async def _read_upload_with_size_limit(upload: UploadFile) -> bytes:
     """Đọc nội dung file upload, từ chối nếu vượt MAX_UPLOAD_SIZE_MB (chống
     DoS bằng file khổng lồ nếu request không đi qua Nginx client_max_body_size)."""
-    content = await upload.read()
-    if len(content) > MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(
-            status_code=413, detail=f"File vượt quá giới hạn cho phép ({MAX_UPLOAD_SIZE_MB}MB)."
-        )
+    chunks = []
+    size = 0
+    while chunk := await upload.read(64 * 1024):
+        size += len(chunk)
+        if size > MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(status_code=413, detail=f"File vượt quá giới hạn cho phép ({MAX_UPLOAD_SIZE_MB}MB).")
+        chunks.append(chunk)
+    content = b"".join(chunks)
+    if not content:
+        raise HTTPException(status_code=400, detail="File rỗng.")
     return content
 
 
@@ -197,6 +211,15 @@ async def _read_upload_with_size_limit(upload: UploadFile) -> bytes:
 @app.get("/api/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/api/ready")
+async def ready(db: AsyncSession = Depends(get_db)):
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "ready"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Cơ sở dữ liệu chưa sẵn sàng.")
 
 
 @app.get("/api/health/ai")
@@ -240,35 +263,7 @@ async def health_ai_ping(user: User = Depends(require_admin)):
 @app.post("/api/auth/register", response_model=UserOut, status_code=201)
 @limiter.limit("5/minute")
 async def register(request: Request, body: RegisterRequest, db: AsyncSession = Depends(get_db)):
-    user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
-
-    if user_count == 0:
-        # Bootstrap: người đầu tiên đăng ký trở thành admin.
-        role = "admin"
-    else:
-        # Từ người thứ 2 trở đi bắt buộc phải là admin đang đăng nhập mới được tạo tài khoản
-        # (giới hạn tối đa MAX_STAFF_ACCOUNTS theo hợp đồng, Ngày 1-2 kế hoạch).
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Hệ thống đã có tài khoản. Vui lòng liên hệ quản trị viên để được cấp tài khoản "
-            "qua endpoint POST /api/auth/users (yêu cầu quyền admin).",
-        )
-
-    existing = (await db.execute(select(User).where(User.username == body.username))).scalar_one_or_none()
-    if existing:
-        raise HTTPException(status_code=409, detail="Tên đăng nhập đã tồn tại.")
-
-    user = User(
-        username=body.username,
-        full_name=body.full_name,
-        email=body.email,
-        hashed_password=hash_password(body.password),
-        role=role,
-    )
-    db.add(user)
-    await db.commit()
-    await db.refresh(user)
-    return user
+    raise HTTPException(status_code=403, detail="Đăng ký công khai đã tắt. Liên hệ quản trị viên để cấp tài khoản.")
 
 
 @app.post("/api/auth/users", response_model=UserOut, status_code=201)
@@ -291,10 +286,11 @@ async def create_staff_user(
     # Khoá độc quyền cho toàn bộ thao tác "đếm + tạo tài khoản" — số hiệu khoá
     # (hash cố định) chỉ cần duy nhất trong phạm vi ứng dụng, không đụng độ
     # với khoá khác trong hệ thống.
-    await db.execute(text("SELECT pg_advisory_xact_lock(72190001)"))
+    if db.bind.dialect.name == "postgresql":
+        await db.execute(text("SELECT pg_advisory_xact_lock(72190001)"))
 
-    user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
-    if user_count >= MAX_STAFF_ACCOUNTS:
+    user_count = (await db.execute(select(func.count()).select_from(User).where(User.role == "staff"))).scalar_one()
+    if body.role == "staff" and user_count >= MAX_STAFF_ACCOUNTS:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Đã đạt giới hạn {MAX_STAFF_ACCOUNTS} tài khoản nhân viên theo hợp đồng.",
@@ -311,7 +307,11 @@ async def create_staff_user(
         role=body.role if body.role in ("admin", "staff") else "staff",
     )
     db.add(user)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Tên đăng nhập hoặc email đã tồn tại.")
     await db.refresh(user)
     return user
 
@@ -332,7 +332,7 @@ async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), d
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản đã bị khoá.")
 
-    token = create_access_token(user.id, user.username, user.role)
+    token = create_access_token(user.id, user.username, user.role, user.hashed_password)
     return TokenResponse(
         access_token=token,
         user={"id": user.id, "username": user.username, "fullName": user.full_name, "role": user.role},
@@ -350,7 +350,7 @@ async def login_json(request: Request, body: LoginRequest, db: AsyncSession = De
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản đã bị khoá.")
 
-    token = create_access_token(user.id, user.username, user.role)
+    token = create_access_token(user.id, user.username, user.role, user.hashed_password)
     return TokenResponse(
         access_token=token,
         user={"id": user.id, "username": user.username, "fullName": user.full_name, "role": user.role},
@@ -403,71 +403,56 @@ async def upload_documents(
     # thiết kế, đồng thời giảm bề mặt tấn công (staff bị chiếm tài khoản
     # không thể phá hoại/đầu độc cơ sở dữ liệu RAG dùng chung).
 ):
-    if not file:
-        raise HTTPException(status_code=400, detail="Vui lòng chọn file tải lên.")
-    user = admin
-
-    created_docs = []
-    for i, upload in enumerate(file):
-        original_name = upload.filename or f"file_{i}"
-
-        # SECURITY FIX: sinh tên file lưu trên đĩa bằng uuid4 qua whitelist,
-        # KHÔNG còn nội suy `original_name` (client-controlled) vào đường
-        # dẫn — chặn path traversal / arbitrary file write. Đồng thời từ
-        # chối thẳng các định dạng ngoài .txt/.docx/.pdf thay vì "chấp nhận
-        # mọi loại file" như bản trước (chặn upload .html/.js giả dạng tài
-        # liệu rồi bị mở ra gây stored XSS).
-        tmp_path, stored_name = _generate_safe_storage_path(UPLOADS_DIR, original_name, ALLOWED_DOCUMENT_EXTENSIONS)
-        ext = Path(stored_name).suffix.lower()
-        content = await _read_upload_with_size_limit(upload)
-        tmp_path.write_bytes(content)
-
-        if ext == ".txt":
-            extracted_text = extract_txt(str(tmp_path))
-        elif ext == ".docx":
-            extracted_text = extract_docx(str(tmp_path))
-        else:  # .pdf — whitelist ở _generate_safe_storage_path đảm bảo không còn nhánh "khác"
-            extracted_text = extract_pdf(str(tmp_path), original_name)
-
-        safe_extracted_text = sanitize_text(extracted_text)
-        # original_name chỉ dùng để hiển thị (code/title), KHÔNG dùng cho đường dẫn ổ đĩa.
-        base_name = original_name.rsplit(".", 1)[0] if "." in original_name else original_name
-        base_name = sanitize_text(base_name)[:255]
-
-        doc_code = (code or "").strip()
-        doc_title = (title or "").strip()
-        if len(file) > 1 or not doc_code:
-            doc_code = re.sub(r"[^A-Za-zÀ-ỹ0-9_-]", "", base_name.upper()) or f"VĂNBẢN_{int(time.time() * 1000)}_{i}"
-        if len(file) > 1 or not doc_title:
-            doc_title = base_name.replace("_", " ")
-        doc_code, doc_title = doc_code[:255], doc_title[:500]
-
-        dest_path = LEGAL_DB_DIR / stored_name
-        try:
-            dest_path.write_bytes(tmp_path.read_bytes())
-            if tmp_path.exists():
-                tmp_path.unlink()
-        except Exception as copy_err:  # noqa: BLE001
-            logger.error("Lỗi sao chép file pháp lý vào thư mục legal_db: %s", copy_err)
-
-        new_doc = Document(
-            code=doc_code,
-            title=doc_title,
-            type=type or "Khác",
-            link=f"/data/legal_db/{stored_name}",
-            content=safe_extracted_text,
-            is_custom=True,
-            uploaded_by=user.id,
-        )
-        db.add(new_doc)
-        created_docs.append(new_doc)
-
-    await db.commit()
-    for d in created_docs:
-        await db.refresh(d)
-
-    result = [d.to_dict() for d in created_docs]
-    return result[0] if len(result) == 1 else result
+    if not file or len(file) > 10:
+        raise HTTPException(status_code=400, detail="Chọn từ 1 đến 10 file mỗi lần.")
+    if type and len(type) > 64:
+        raise HTTPException(status_code=422, detail="Loại tài liệu tối đa 64 ký tự.")
+    created_docs, written_paths = [], []
+    total_size = 0
+    try:
+        for i, upload in enumerate(file):
+            original_name = upload.filename or f"file_{i}"
+            dest_path, stored_name = _generate_safe_storage_path(LEGAL_DB_DIR, original_name, ALLOWED_DOCUMENT_EXTENSIONS)
+            ext = dest_path.suffix
+            content = await _read_upload_with_size_limit(upload)
+            total_size += len(content)
+            if total_size > MAX_UPLOAD_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail="Tổng dung lượng file vượt giới hạn upload.")
+            await run_in_threadpool(validate_upload, content, ext)
+            written_paths.append(dest_path)
+            await run_in_threadpool(dest_path.write_bytes, content)
+            if ext == ".txt":
+                extracted = await run_in_threadpool(extract_txt, str(dest_path))
+            elif ext == ".docx":
+                extracted = await run_in_threadpool(extract_docx, str(dest_path))
+            else:
+                extracted = await run_in_threadpool(extract_pdf, str(dest_path), original_name)
+            safe_text = sanitize_text(extracted)
+            if not safe_text:
+                raise HTTPException(status_code=422, detail="Không có văn bản có thể đọc. Hãy OCR tài liệu trước khi nạp vào thư viện.")
+            if len(safe_text) > 2_000_000:
+                raise HTTPException(status_code=413, detail="Nội dung trích xuất quá lớn.")
+            base = sanitize_text(Path(original_name.replace("\\", "/")).stem)[:255]
+            doc_code = (code or "").strip() if len(file) == 1 else ""
+            doc_title = (title or "").strip() if len(file) == 1 else ""
+            new_doc = Document(code=(doc_code or base.upper() or "VANBAN")[:255],
+                title=(doc_title or base.replace("_", " ") or "Tài liệu")[:500],
+                type=type or "Khác", link=f"/data/legal_db/{stored_name}",
+                content=safe_text, is_custom=True, uploaded_by=admin.id)
+            db.add(new_doc)
+            created_docs.append(new_doc)
+        await db.flush()
+        result = [d.to_dict() for d in created_docs]
+        await db.commit()
+        return result[0] if len(result) == 1 else result
+    except Exception as err:
+        await db.rollback()
+        for path in written_paths:
+            path.unlink(missing_ok=True)
+        if isinstance(err, HTTPException):
+            raise
+        logger.exception("Upload tài liệu thất bại")
+        raise HTTPException(status_code=422, detail="File không hợp lệ hoặc không thể trích xuất. Kiểm tra lại tài liệu.")
 
 
 @app.delete("/api/documents/{doc_id}")
@@ -477,19 +462,14 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db), admin
     if not doc:
         raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu cần xóa.")
 
-    if doc.is_custom:
-        link = doc.link or ""
-        if link.startswith("/data/uploads/"):
-            p = UPLOADS_DIR / link.replace("/data/uploads/", "")
-            if p.exists() and p.resolve().is_relative_to(UPLOADS_DIR.resolve()):
-                p.unlink()
-        elif link.startswith("/data/legal_db/"):
-            p = LEGAL_DB_DIR / link.replace("/data/legal_db/", "")
-            if p.exists() and p.resolve().is_relative_to(LEGAL_DB_DIR.resolve()):
-                p.unlink()
-
+    path = resolve_stored_file(doc.link or "", UPLOADS_DIR, LEGAL_DB_DIR) if doc.is_custom else None
     await db.delete(doc)
     await db.commit()
+    if path:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Không dọn được file đã xóa metadata; cần dọn volume khi bảo trì")
     return {"success": True, "message": "Đã xóa tài liệu khỏi danh mục RAG."}
 
 
@@ -510,14 +490,14 @@ async def download_document(
             actual_path = None
             link = doc.link or ""
             if link.startswith("/data/uploads/"):
-                actual_path = UPLOADS_DIR / link.replace("/data/uploads/", "")
+                actual_path = resolve_stored_file(link, UPLOADS_DIR, LEGAL_DB_DIR)
             elif link.startswith("/data/legal_db/"):
-                actual_path = LEGAL_DB_DIR / link.replace("/data/legal_db/", "")
+                actual_path = resolve_stored_file(link, UPLOADS_DIR, LEGAL_DB_DIR)
             if actual_path and actual_path.exists() and link.lower().endswith(".pdf"):
                 safe_title = _safe_filename(doc.title)
                 return FileResponse(str(actual_path), media_type="application/pdf", filename=f"{safe_title}.pdf")
 
-        pdf_bytes = generate_document_pdf(doc_dict)
+        pdf_bytes = await run_in_threadpool(generate_document_pdf, doc_dict)
         safe_filename = _safe_filename(doc.title) + ".pdf"
         return Response(
             content=pdf_bytes, media_type="application/pdf",
@@ -529,10 +509,10 @@ async def download_document(
         actual_path, filename = None, ""
         if link.startswith("/data/uploads/"):
             filename = link.replace("/data/uploads/", "")
-            actual_path = UPLOADS_DIR / filename
+            actual_path = resolve_stored_file(link, UPLOADS_DIR, LEGAL_DB_DIR)
         elif link.startswith("/data/legal_db/"):
             filename = link.replace("/data/legal_db/", "")
-            actual_path = LEGAL_DB_DIR / filename
+            actual_path = resolve_stored_file(link, UPLOADS_DIR, LEGAL_DB_DIR)
         if actual_path and actual_path.exists():
             safe_title = _safe_filename(doc.title)
             ext = Path(filename).suffix
@@ -554,6 +534,8 @@ async def reset_documents(db: AsyncSession = Depends(get_db), admin: User = Depe
     """Chỉ admin được reset toàn bộ thư viện pháp lý dùng chung (Ngày 2 kế hoạch)."""
     from app.default_documents import DEFAULT_DOCUMENTS
 
+    old_docs = (await db.execute(select(Document).where(Document.is_custom.is_(True)))).scalars().all()
+    paths = [resolve_stored_file(d.link, UPLOADS_DIR, LEGAL_DB_DIR) for d in old_docs]
     await db.execute(delete(Document))
     for d in DEFAULT_DOCUMENTS:
         db.add(
@@ -561,6 +543,9 @@ async def reset_documents(db: AsyncSession = Depends(get_db), admin: User = Depe
                      content=d["content"], is_custom=False)
         )
     await db.commit()
+    for path in paths:
+        if path:
+            path.unlink(missing_ok=True)
     result = await db.execute(select(Document).order_by(Document.uploaded_at))
     return [d.to_dict() for d in result.scalars().all()]
 
@@ -570,9 +555,9 @@ async def reset_documents(db: AsyncSession = Depends(get_db), admin: User = Depe
 # ---------------------------------------------------------------------------
 DEFAULT_PROJECT = {
     "name": "Dự án mới", "location": "", "investor": "", "designer": "",
-    "stage": "Thiết kế cơ sở", "type": "Nhà ở riêng lẻ kết hợp kinh doanh",
+    "stage": "", "type": "",
     "length": 0, "width": 0, "height": 0, "pcccHeight": 0, "floorArea": 0,
-    "totalFloorArea": 0, "floors": 0, "basements": 0, "fireRating": "Bậc III",
+    "totalFloorArea": 0, "floors": 0, "basements": 0, "fireRating": "",
     "commercialDetails": "",
 }
 
@@ -593,18 +578,59 @@ async def _load_session_full(db: AsyncSession, session_id: str) -> Optional[Chat
     return result.scalar_one_or_none()
 
 
-def _session_to_dict(session: ChatSession) -> dict:
+def _session_revision(session: ChatSession) -> str:
+    stamp = session.updated_at
+    if stamp and stamp.tzinfo is None:
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    data = {"updatedAt": stamp.astimezone(timezone.utc).isoformat() if stamp else None,
+            "project": session.project_data.to_dict() if session.project_data else dict(DEFAULT_PROJECT)}
+    return hashlib.sha256(json.dumps(data, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _check_revision(session: ChatSession, expected: Optional[str]) -> None:
+    if expected is None:
+        if NODE_ENV == "production":
+            raise HTTPException(status_code=428, detail="Cần phiên bản hồ sơ. Tải lại trang trước khi tiếp tục.")
+        return
+    if not isinstance(expected, str) or not re.fullmatch(r'"?[a-f0-9]{64}"?', expected):
+        raise HTTPException(status_code=422, detail="Mã phiên bản hồ sơ không hợp lệ.")
+    if expected.strip('"') != _session_revision(session):
+        raise HTTPException(status_code=412, detail="Hồ sơ đã được thay đổi ở phiên khác. Tải lại hồ sơ trước khi tiếp tục; dữ liệu chưa được ghi đè.")
+
+
+def _project_fingerprint(project: dict) -> str:
+    return hashlib.sha256(json.dumps(project, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _is_reviewed(session: ChatSession) -> bool:
     project = session.project_data.to_dict() if session.project_data else dict(DEFAULT_PROJECT)
+    first = session.checklist[0] if session.checklist and isinstance(session.checklist[0], dict) else {}
+    return first.get("reviewedProjectHash") == _project_fingerprint(project) and isinstance(first.get("reviewedBasis"), dict) and first["reviewedBasis"].get("rulesVersion") == "v11.3-347-2026-annexIII"
+
+
+def _clear_review(session: ChatSession) -> None:
+    session.checklist = None
+    session.is_subject_to_appraisal = None
+    session.appraisal_reason = ""
+    session.warnings = []
+
+
+def _session_to_dict(session: ChatSession) -> dict:
+    """Draft reads never run rules. A reviewed result is only for its exact inputs."""
+    project = session.project_data.to_dict() if session.project_data else dict(DEFAULT_PROJECT)
+    reviewed = _is_reviewed(session)
+    basis = session.checklist[0]["reviewedBasis"] if reviewed else None
+    checklist = [{k: v for k, v in item.items() if k not in {"reviewedProjectHash", "reviewedBasis"}} for item in session.checklist] if reviewed else []
     return {
-        "id": session.id,
-        "title": session.title,
-        "projectInfo": project,
+        "id": session.id, "title": session.title, "projectInfo": project,
         "messages": [m.to_dict() for m in session.messages],
         "updatedAt": session.updated_at.isoformat() if session.updated_at else _now_iso(),
-        "checklist": session.checklist,
-        "isSubjectToAppraisal": session.is_subject_to_appraisal,
-        "appraisalReason": session.appraisal_reason,
-        "warnings": session.warnings,
+        "revision": _session_revision(session), "reviewState": "reviewed" if reviewed else "draft",
+        "checklist": checklist,
+        "isSubjectToAppraisal": session.is_subject_to_appraisal if reviewed else None,
+        "appraisalReason": session.appraisal_reason if reviewed else "Chưa kiểm duyệt. Hoàn tất thông số rồi bấm Kiểm duyệt hồ sơ.",
+        "appraisalBasis": basis,
+        "warnings": session.warnings or [] if reviewed else [],
     }
 
 
@@ -614,7 +640,7 @@ def _owner_filter(user: User):
 
 
 @app.get("/api/sessions")
-async def get_sessions(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def get_sessions(limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     # FIX (rà soát cuối cùng trước bàn giao): trước đây KHÔNG có giới hạn —
     # tải TOÀN BỘ session (kèm toàn bộ tin nhắn từng session) mỗi lần gọi.
     # Với quy mô đội ngũ nhỏ (<=10 nhân viên theo hợp đồng) đây chưa phải
@@ -629,7 +655,7 @@ async def get_sessions(db: AsyncSession = Depends(get_db), user: User = Depends(
         select(ChatSession)
         .options(selectinload(ChatSession.messages), selectinload(ChatSession.project_data))
         .order_by(ChatSession.updated_at.desc())
-        .limit(200)
+        .limit(limit).offset(offset)
     )
     cond = _owner_filter(user)
     if cond is not None:
@@ -654,15 +680,11 @@ async def create_session(
     title = body.title
     project_overrides = body.projectInfo.model_dump(exclude_unset=True) if body.projectInfo else {}
     project_info = {**DEFAULT_PROJECT, **project_overrides}
-    initial_appraisal = evaluate_appraisal(project_info)
 
     session = ChatSession(
         owner_id=user.id,
         title=title or "Hồ sơ mới thẩm định",
-        checklist=initial_appraisal["checklist"],
-        is_subject_to_appraisal=initial_appraisal["isSubjectToAppraisal"],
-        appraisal_reason=initial_appraisal["appraisalReason"],
-        warnings=initial_appraisal["warnings"],
+        checklist=None, is_subject_to_appraisal=None, appraisal_reason="", warnings=[],
     )
     db.add(session)
     await db.flush()
@@ -674,14 +696,7 @@ async def create_session(
     welcome_msg = ChatMessage(
         session_id=session.id,
         sender="assistant",
-        text=(
-            "Xin chào! Tôi là Chuyên gia AI Thẩm định Hồ sơ Thiết kế Phòng cháy chữa cháy với 20 năm "
-            "kinh nghiệm.\n\nHãy mô tả thông tin cơ bản về công trình của bạn (loại công trình, số "
-            "tầng, diện tích sàn, kích thước đất, chiều cao, công năng chi tiết...), hoặc tải lên bản vẽ "
-            "để tôi tự động đọc và điền thông số (tính năng OCR). Tôi sẽ hỗ trợ rà soát, đối chiếu và "
-            "thẩm định tỷ mỉ đối với các quy định hiện hành mới nhất (Nghị định 105/2025/NĐ-CP, QCVN "
-            "06:2022/BXD) cho bạn!"
-        ),
+        text="Xin chào! Tôi là trợ lý hỗ trợ rà soát hồ sơ PCCC. Hãy nhập công năng, số tầng, diện tích và chiều cao PCCC hoặc tải bản vẽ. Kết quả sàng lọc cần kỹ sư xác nhận; không thay thế thẩm định hoặc nghiệm thu của cơ quan có thẩm quyền.",
     )
     db.add(welcome_msg)
 
@@ -690,89 +705,79 @@ async def create_session(
     return _session_to_dict(full)
 
 
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    await lock_session(db, session_id)
+    session = await _load_session_full(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hồ sơ.")
+    if user.role != "admin" and session.owner_id != user.id:
+        raise HTTPException(status_code=403, detail="Không có quyền đọc hồ sơ này.")
+    return _session_to_dict(session)
+
+
 @app.delete("/api/sessions/{session_id}")
-async def delete_session(session_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    session = await db.get(ChatSession, session_id)
+async def delete_session(session_id: str, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user), expected_revision: Optional[str] = Header(None, alias="If-Match")):
+    await lock_session(db, session_id)
+    session = await _load_session_full(db, session_id)
     if session and user.role != "admin" and session.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Không có quyền xoá hồ sơ của người khác.")
     if session:
+        _check_revision(session, expected_revision)
         await db.delete(session)
         await db.commit()
     return {"success": True}
 
 
-def _merge_checklist(ai_checklist: Optional[List[dict]], deterministic_checklist: List[dict]) -> List[dict]:
-    """FIX B06 + B10 (Bao_Cao_QA_Lan_2.md): trước đây 'result' của cả 17
-    hạng mục được lấy thẳng từ JSON do Gemini tự sinh, khớp theo 'stt' do
-    chính AI tự gán trong cùng lượt trả lời. Với temperature > 0, LLM có
-    thể (a) gán sai stt cho một note (khiến cột 'Kết luận chi tiết' nói về
-    hạng mục khác — B06), và (b) trả 'result' khác nhau giữa các lần gọi
-    dù đầu vào giống hệt (B10 — số mục 'Đạt' nhảy loạn 0→7/17).
+def _user_grounding_text(history: List[dict], current_text: str) -> str:
+    """Lời người dùng làm căn cứ cho số liệu AI trích xuất: tin hiện tại + các tin người dùng gần nhất."""
+    recent = [str(m.get("text") or "") for m in history[-8:] if m.get("sender") == "user"]
+    return "\n".join(recent + [current_text or ""])
 
-    Sửa tận gốc: 'result' của TẤT CẢ 17 hạng mục giờ LUÔN lấy từ
-    `deterministic_checklist` (rules_engine.evaluate_appraisal — cây quyết
-    định thuần toán học, 100% tái lập được, đã test kỹ). AI chỉ còn quyền
-    đóng góp phần 'note' (văn bản phân tích ngữ cảnh, không ảnh hưởng kết
-    luận Đạt/Không đạt) — và CHỈ khi ai_checklist hợp lệ (đủ đúng 17 phần
-    tử, stt là hoán vị 1..17, không trùng/thiếu). Nếu Gemini trả về dữ liệu
-    dị dạng (thiếu/thừa/trùng stt — dấu hiệu điển hình của lần chạy lỗi),
-    toàn bộ note cũng fallback về rules_engine để tránh lệch nội dung.
+
+def _apply_ai_outputs(session: "ChatSession", parsed: dict, grounding_text: Optional[str]) -> dict:
+    """Điểm DUY NHẤT để dữ liệu do AI sinh ra đi vào hồ sơ.
+
+    1. Số liệu trích xuất: chỉ ghi phần hợp lệ + có căn cứ (xem ai_guard.sanitize_extracted_info).
+    2. Tính lại kết luận bằng rules_engine trên số liệu cuối cùng.
+    3. Lọc `reply` và `warnings` của AI mâu thuẫn với kết luận (xem ai_guard.guard_reply).
+    Trả về {"deterministic", "reply", "warnings"}.
     """
-    ai_list = ai_checklist or []
-    stt_values = []
-    for it in ai_list:
+    current = session.project_data.to_dict()
+    result = sanitize_extracted_info(parsed.get("extractedProjectInfo"), current, grounding_text)
+    if result["accepted"]:
         try:
-            stt_values.append(int(it.get("stt")))
-        except (TypeError, ValueError):
-            continue
+            checked = ProjectUpdateRequest.model_validate({**current, **result["accepted"]})
+            session.project_data.apply_dict(checked.model_dump(exclude_none=True))
+        except ValidationError:
+            result["rejected"].append("Dữ liệu AI mâu thuẫn hoặc sai cấu trúc; giữ hồ sơ hiện tại.")
+    for note in result["rejected"]:
+        logger.warning("[ai_guard] session=%s %s", session.id, note)
 
-    is_ai_checklist_valid = len(ai_list) == 17 and sorted(stt_values) == list(range(1, 18))
-    ai_by_stt = {int(it["stt"]): it for it in ai_list} if is_ai_checklist_valid else {}
+    final_pinfo = session.project_data.to_dict()
+    deterministic = evaluate_appraisal(final_pinfo)
+    basis = deterministic["appraisalBasis"]
 
-    det_by_stt = {d["stt"]: d for d in deterministic_checklist}
+    reply, violations = guard_reply(parsed.get("reply"), basis, final_pinfo)
+    if violations:
+        logger.warning("[ai_guard] session=%s đã lược bỏ nhận định mâu thuẫn trong reply: %s", session.id, violations)
+    notes = result["rejected"] + result["derived"]
+    if result["rejected"] and reply:
+        shown = "; ".join(result["rejected"][:3])
+        reply = f"{reply}\n\nℹ️ Một số số liệu AI đề xuất chưa được ghi vào hồ sơ: {shown}"
 
-    # FIX (rà soát theo ảnh chụp người dùng gửi — "BẤT ĐỒNG BỘ KẾT LUẬN"):
-    # đã vá trực tiếp trường hợp cụ thể (mục 12 cho karaoke) trong
-    # rules_engine.py, nhưng đó chỉ là 1 trường hợp CỤ THỂ đã biết — theo
-    # yêu cầu rà soát "hết các trường hợp tương tự CÓ THỂ xảy ra", cần thêm
-    # 1 lớp phòng vệ CHUNG ở đây: nếu note do AI trả về (dùng ngôn ngữ tự
-    # do, không kiểm soát được hết mọi tổ hợp công năng/hạng mục) khẳng định
-    # "bắt buộc" cho đúng hạng mục đó, nhưng result deterministic lại là
-    # "Không bắt buộc" — đây LUÔN là mâu thuẫn ngữ nghĩa trực tiếp giữa 2
-    # cột cùng hiển thị cho người dùng, bất kể nguyên nhân là công năng nào
-    # chưa được rules_engine.py tính đến. Trường hợp này KHÔNG dùng note AI
-    # (dù ai_checklist hợp lệ) — fallback về note deterministic, vốn LUÔN
-    # tự nhất quán với chính result của nó.
-    _CONTRADICTION_MARKER = "bắt buộc"
+    ai_warnings, dropped = guard_warnings(parsed.get("warnings"), basis, final_pinfo)
+    if dropped:
+        logger.warning("[ai_guard] session=%s đã loại %d cảnh báo AI mâu thuẫn kết luận", session.id, dropped)
+    warnings = list(dict.fromkeys(deterministic["warnings"] + notes + ai_warnings))
+    return {"deterministic": deterministic, "reply": reply, "warnings": warnings, "final_pinfo": final_pinfo}
 
-    merged = []
-    for t in STANDARDS_CHECKLIST_TEMPLATE:
-        det = det_by_stt.get(t["stt"], {})
-        det_result = det.get("result") or "Cần xem xét"
-        ai_item = ai_by_stt.get(t["stt"])
-        ai_note = (ai_item or {}).get("note")
-        ai_note = ai_note.strip() if isinstance(ai_note, str) and ai_note.strip() else None
 
-        if ai_note and det_result == "Không bắt buộc" and _CONTRADICTION_MARKER in ai_note.lower():
-            logger.warning(
-                "Bỏ qua note AI mâu thuẫn với result tại mục %s (result='Không bắt buộc' nhưng note chứa "
-                "'bắt buộc') — fallback về note deterministic để tránh bất đồng bộ hiển thị cho người dùng.",
-                t["stt"],
-            )
-            ai_note = None
-
-        merged.append(
-            {
-                "stt": t["stt"], "category": t["criteria"], "criteria": t["criteria"],
-                "requirement": t["requirement"],
-                "result": det_result,  # LUÔN deterministic, không cho AI ghi đè
-                "note": ai_note
-                or det.get("note")
-                or f"Chưa đủ thông tin rà soát cụ thể. Vui lòng trao đổi thêm về thông số {t['criteria'].lower()} của công trình.",
-                "reference": t["reference"],
-            }
-        )
-    return merged
+def _merge_checklist(ai_checklist: Optional[List[dict]], deterministic_checklist: List[dict]) -> List[dict]:
+    """Return verified screening notes; AI cannot certify technical compliance."""
+    # Checklist chỉ dùng nhận xét được xác định trong rules engine. AI không có bằng chứng
+    # về cấu kiện/thiết bị thực tế và không được tự chứng nhận tuân thủ.
+    return [dict(item) for item in deterministic_checklist]
 
 
 async def _log_inspection(
@@ -791,14 +796,18 @@ async def _log_inspection(
 
 @app.put("/api/sessions/{session_id}/project")
 async def update_session_project(
-    session_id: str, body: ProjectUpdateRequest, appraise: str = Query("false"),
+    session_id: str, body: ProjectUpdateRequest, appraise: Literal["true", "false"] = Query("false"),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+    expected_revision: Optional[str] = Header(None, alias="If-Match"),
 ):
+    await lock_session(db, session_id)
     session = await _load_session_full(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Không tìm thấy phiên chat.")
     if user.role != "admin" and session.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Không có quyền chỉnh sửa hồ sơ của người khác.")
+
+    _check_revision(session, expected_revision)
 
     if not session.project_data:
         session.project_data = ProjectData(session_id=session.id)
@@ -806,110 +815,49 @@ async def update_session_project(
     # FIX B03: body giờ đã qua Pydantic validation (ge=0, kiểm tra logic diện
     # tích) — request có giá trị âm/vô lý sẽ bị chặn ở tầng FastAPI với 422
     # trước khi tới được đây, không cần validate thủ công nữa.
-    session.project_data.apply_dict(body.model_dump(exclude_unset=True))
+    changes = body.model_dump(exclude_unset=True, exclude_none=True)
+    merged = {**session.project_data.to_dict(), **changes}
+    if "components" in changes and changes["components"] != session.project_data.components:
+        if "componentsComplete" not in changes:
+            merged["componentsComplete"] = False
+        old_ids = {c["id"] for c in (session.project_data.components or [])}
+        new_ids = {c["id"] for c in (changes["components"] or [])}
+        if old_ids != new_ids:
+            for key, attribute in (("sharedSystems", "shared_systems"), ("concurrentDesign", "concurrent_design")):
+                if key not in changes:
+                    merged[key] = None
+                    setattr(session.project_data, attribute, None)
+    for count_key, array_keys in (("floors", ("floorFunctions",)), ("basements", ("basementFunctions", "basementHeights", "basementAreas", "basementFootprints"))):
+        if count_key in changes:
+            for key in array_keys:
+                merged[key] = (merged.get(key) or [])[:changes[count_key]]
+    try:
+        validated = ProjectUpdateRequest.model_validate(merged)
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Thông số cập nhật mâu thuẫn với hồ sơ đã lưu (diện tích/tầng).")
+    session.project_data.apply_dict(validated.model_dump(exclude_none=True))
+    session.project_data.source = "manual"
+    session.updated_at = datetime.now(timezone.utc)
     pinfo = session.project_data.to_dict()
 
     should_appraise = appraise == "true"
 
-    # Tải danh sách toàn bộ documents + sessions khác để build RAG / prior-project context.
-    docs_result = await db.execute(select(Document))
-    documents = [d.to_dict() for d in docs_result.scalars().all()]
-
-    other_sessions_result = await db.execute(
-        select(ChatSession)
-        .where(ChatSession.id != session_id)
-        .options(selectinload(ChatSession.project_data))
-    )
-    other_sessions = [
-        {
-            "id": s.id, "projectInfo": s.project_data.to_dict() if s.project_data else {},
-            "checklist": s.checklist, "isSubjectToAppraisal": s.is_subject_to_appraisal,
-            "appraisalReason": s.appraisal_reason,
-        }
-        for s in other_sessions_result.scalars().all()
-    ]
-
     if should_appraise:
-        floor_funcs_str = ""
-        if pinfo.get("floorFunctions"):
-            floor_funcs_str = ", ".join(f"Tầng nổi {i + 1}: {fn}" for i, fn in enumerate(pinfo["floorFunctions"]))
-
-        basement_specs_str = "Không có tầng hầm"
-        if pinfo.get("basements") and pinfo["basements"] > 0:
-            detail_list = []
-            for i in range(pinfo["basements"]):
-                b_fn = (pinfo.get("basementFunctions") or [])[i] if pinfo.get("basementFunctions") and i < len(pinfo["basementFunctions"]) else "Bãi đỗ xe hầm"
-                b_h = (pinfo.get("basementHeights") or [])[i] if pinfo.get("basementHeights") and i < len(pinfo["basementHeights"]) else 3.3
-                b_a = (pinfo.get("basementAreas") or [])[i] if pinfo.get("basementAreas") and i < len(pinfo["basementAreas"]) else 0
-                b_f = (pinfo.get("basementFootprints") or [])[i] if pinfo.get("basementFootprints") and i < len(pinfo["basementFootprints"]) else 0
-                detail_list.append(f"Tầng hầm {i + 1} (Công năng: {b_fn}, Chiều cao: {b_h}m, Diện tích sàn: {b_a}m², Diện tích xây dựng hầm: {b_f}m²)")
-            basement_specs_str = "; ".join(detail_list)
-
-        trigger_text = f"""[Phản hồi Hệ thống]: Khách hàng yêu cầu KÍCH HOẠT KIỂM DUYỆT HỒ SƠ từ bảng điều khiển dựa trên toàn bộ thông số kỹ thuật chi tiết của công trình đã nhập:
-- Tên công trình: {pinfo.get('name') or 'N/A'}
-- Địa điểm: {pinfo.get('location') or 'N/A'}
-- Chủ đầu tư: {pinfo.get('investor') or 'N/A'}
-- Đơn vị thiết kế: {pinfo.get('designer') or 'N/A'}
-- Loại hình công trình diện kiểm duyệt: {pinfo.get('type') or 'N/A'}
-- Số tầng nổi: {pinfo.get('floors') or 0} tầng
-- Số tầng hầm: {pinfo.get('basements') or 0} hầm
-- Chiều cao PCCC thiết kế: {pinfo.get('pcccHeight') or 0} m
-- Diện tích sàn xây dựng cơ sở: {pinfo.get('floorArea') or 0} m²
-- Tổng diện tích sàn cộng dồn: {pinfo.get('totalFloorArea') or 0} m²
-- Bậc chịu lửa dự kiến thiết kế: {pinfo.get('fireRating') or 'Chưa lựa chọn'}
-- Chi tiết kinh doanh phát sinh: {pinfo.get('commercialDetails') or 'N/A'}
-- Chi tiết công năng từng tầng nổi: {floor_funcs_str or 'Chưa tách biệt công năng'}
-- Chi tiết thông số các tầng hầm: {basement_specs_str}
-
-Hãy rà soát kỹ lưỡng toàn bộ quy mô kỹ thuật xây dựng và công năng này đối chiếu với Toàn bộ Cơ sở dữ liệu Pháp lý (RAG) để đưa ra Kết luận Pháp lý rõ ràng và chi tiết hóa Bảng checklist 17 mục quy chuẩn PCCC (Đạt/Không đạt/Khuyến nghị/Cần xem xét)."""
-
-        try:
-            messages_history = [m.to_dict() for m in session.messages]
-            parsed_response = await run_deep_llm_appraisal(
-                pinfo, messages_history, documents, other_sessions, trigger_text, session_id
-            )
-
-            if parsed_response.get("extractedProjectInfo"):
-                session.project_data.apply_dict(parsed_response["extractedProjectInfo"])
-
-            # FIX B10 + B06 (Bao_Cao_QA_Lan_2.md): tính lại bằng rules_engine
-            # (deterministic) dựa trên thông số CUỐI CÙNG (đã áp dụng
-            # extractedProjectInfo nếu AI có trích xuất thêm) — đây là nguồn
-            # sự thật DUY NHẤT cho 'result' từng hạng mục và kết luận pháp lý
-            # isSubjectToAppraisal/appraisalReason. AI chỉ còn đóng góp phần
-            # 'note' (văn phong phân tích) và 'reply' (lời thoại hội thoại).
-            final_pinfo = session.project_data.to_dict()
-            deterministic = evaluate_appraisal(final_pinfo)
-            merged_checklist = _merge_checklist(parsed_response.get("checklist"), deterministic["checklist"])
-
-            assistant_msg = ChatMessage(
-                session_id=session.id, sender="assistant",
-                text=parsed_response.get("reply") or "Tôi đã hoàn thành kiểm thẩm định hồ sơ của bạn đối chiếu với CSDL.",
-            )
-            db.add(assistant_msg)
-
-            session.checklist = merged_checklist
-            session.is_subject_to_appraisal = deterministic["isSubjectToAppraisal"]
-            session.appraisal_reason = deterministic["appraisalReason"]
-            # Gộp cảnh báo từ cả rules_engine (mâu thuẫn số liệu cứng, luôn đúng)
-            # và AI (mâu thuẫn ngữ nghĩa AI phát hiện được, ví dụ công năng
-            # khai báo mâu thuẫn giữa các lượt chat) — loại trùng, giữ thứ tự.
-            ai_warnings = parsed_response.get("warnings") or []
-            session.warnings = list(dict.fromkeys(deterministic["warnings"] + ai_warnings))
-
-            await _log_inspection(
-                db, session, user.id, "manual_appraise",
-                session.is_subject_to_appraisal, session.appraisal_reason, merged_checklist, session.warnings,
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.error("Lỗi cập nhật thẩm duyệt LLM: %s", e, exc_info=True)
-            raise HTTPException(status_code=500, detail="Lỗi thẩm duyệt hồ sơ. Vui lòng thử lại hoặc liên hệ quản trị viên.")
+        evaluation = evaluate_appraisal(pinfo)
+        stored = [dict(item) for item in evaluation["checklist"]]
+        stored[0]["reviewedProjectHash"] = _project_fingerprint(pinfo)
+        stored[0]["reviewedBasis"] = evaluation["appraisalBasis"]
+        session.checklist = stored
+        session.is_subject_to_appraisal = evaluation["isSubjectToAppraisal"]
+        session.appraisal_reason = evaluation["appraisalReason"]
+        session.warnings = evaluation["warnings"]
+        message = ChatMessage(session_id=session.id, sender="assistant",
+            text=evaluation["appraisalReason"] + "\n" + "\n".join(evaluation["warnings"]))
+        db.add(message)
+        await _log_inspection(db, session, user.id, "manual_appraise",
+            session.is_subject_to_appraisal, session.appraisal_reason, evaluation["checklist"], session.warnings)
     else:
-        local_eval = evaluate_appraisal(pinfo)
-        session.checklist = local_eval["checklist"]
-        session.is_subject_to_appraisal = local_eval["isSubjectToAppraisal"]
-        session.appraisal_reason = local_eval["appraisalReason"]
-        session.warnings = local_eval["warnings"]
+        _clear_review(session)
 
     await db.commit()
     full = await _load_session_full(db, session_id)
@@ -921,90 +869,35 @@ Hãy rà soát kỹ lưỡng toàn bộ quy mô kỹ thuật xây dựng và cô
 # ---------------------------------------------------------------------------
 @app.post("/api/chat")
 @limiter.limit("30/minute")  # SECURITY FIX: chống lạm dụng chi phí gọi Gemini API
-async def chat(request: Request, body: ChatRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+async def chat(request: Request, body: ChatRequest, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user), expected_revision: Optional[str] = Header(None, alias="If-Match")):
     # SECURITY FIX: trước đây nhận `dict` thô không kiểm tra kiểu/độ dài —
     # giờ dùng ChatRequest (Pydantic) validate sessionId/messageText, giới
     # hạn độ dài tin nhắn = MAX_CHAT_MESSAGE_LENGTH ký tự.
     session_id = body.sessionId
     message_text = body.messageText
 
+    await lock_session(db, session_id)
     session = await _load_session_full(db, session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Không tìm thấy phiên chat.")
     if user.role != "admin" and session.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Không có quyền truy cập hồ sơ của người khác.")
 
-    if not session.project_data:
-        session.project_data = ProjectData(session_id=session.id)
-        db.add(session.project_data)
-    project = session.project_data.to_dict()
+    _check_revision(session, expected_revision)
 
-    user_msg = ChatMessage(session_id=session.id, sender="user", text=message_text)
-    db.add(user_msg)
-    await db.flush()
-
-    docs_result = await db.execute(select(Document))
-    documents = [d.to_dict() for d in docs_result.scalars().all()]
-    other_sessions_result = await db.execute(
-        select(ChatSession).where(ChatSession.id != session_id).options(selectinload(ChatSession.project_data))
-    )
-    other_sessions = [
-        {
-            "id": s.id, "projectInfo": s.project_data.to_dict() if s.project_data else {},
-            "checklist": s.checklist, "isSubjectToAppraisal": s.is_subject_to_appraisal,
-            "appraisalReason": s.appraisal_reason,
-        }
-        for s in other_sessions_result.scalars().all()
-    ]
-
-    try:
-        messages_history = [m.to_dict() for m in session.messages] + [user_msg.to_dict()]
-        parsed_response = await run_deep_llm_appraisal(
-            project, messages_history, documents, other_sessions, message_text, session_id
-        )
-
-        if parsed_response.get("extractedProjectInfo"):
-            session.project_data.apply_dict(parsed_response["extractedProjectInfo"])
-
-        # FIX B10 + B06: xem chú thích chi tiết ở update_session_project() —
-        # cùng nguyên tắc: result/isSubjectToAppraisal LUÔN deterministic.
-        final_pinfo = session.project_data.to_dict()
-        deterministic = evaluate_appraisal(final_pinfo)
-        merged_checklist = _merge_checklist(parsed_response.get("checklist"), deterministic["checklist"])
-
-        assistant_msg = ChatMessage(
-            session_id=session.id, sender="assistant",
-            text=parsed_response.get("reply") or "Tôi đã nhận thông tin và cập nhật hệ thống.",
-        )
-        db.add(assistant_msg)
-
-        session.checklist = merged_checklist
-        session.is_subject_to_appraisal = deterministic["isSubjectToAppraisal"]
-        session.appraisal_reason = deterministic["appraisalReason"]
-        ai_warnings = parsed_response.get("warnings") or []
-        session.warnings = list(dict.fromkeys(deterministic["warnings"] + ai_warnings))
-
-        await _log_inspection(
-            db, session, user.id, "chat",
-            session.is_subject_to_appraisal, session.appraisal_reason, merged_checklist, session.warnings,
-        )
-        await db.commit()
-
-        full = await _load_session_full(db, session_id)
-        return {
-            "reply": parsed_response.get("reply") or assistant_msg.text,
-            "warnings": full.warnings or [],
-            "isSubjectToAppraisal": full.is_subject_to_appraisal or False,
-            "appraisalReason": full.appraisal_reason or "Chưa có báo cáo chi tiết.",
-            "checklist": merged_checklist,
-            "projectInfo": full.project_data.to_dict(),
-            "messages": [m.to_dict() for m in full.messages],
-        }
-    except HTTPException:
-        raise
-    except Exception as e:  # noqa: BLE001
-        logger.error("Lỗi chatbot: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Lỗi xử lý trò chuyện AI. Vui lòng thử lại hoặc liên hệ quản trị viên.")
+    # Chat cannot trigger a review or alter the inputs entered in the left form.
+    if not _is_reviewed(session):
+        reply = "Thông số đang là bản nháp, chưa được rà soát. Hãy nhập xong và bấm Kiểm duyệt hồ sơ; tôi không tự dùng thông số đang nhập để kết luận."
+    elif re.search(r"kết luận|kết quả|quy mô|thuộc diện|ngưỡng", message_text.lower()):
+        reply = session.appraisal_reason + "\n" + "\n".join(session.warnings or [])
+    else:
+        reply = "Không tìm thấy quy định phù hợp để trả lời câu hỏi này trong bộ quy tắc đã xác minh. Không đủ căn cứ đưa ra kết luận kỹ thuật; cần kỹ sư bổ sung và xác nhận quy định áp dụng."
+    db.add(ChatMessage(session_id=session.id, sender="user", text=message_text))
+    db.add(ChatMessage(session_id=session.id, sender="assistant", text=reply))
+    session.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    full = await _load_session_full(db, session_id)
+    return {**_session_to_dict(full), "reply": reply}
 
 
 # ---------------------------------------------------------------------------
@@ -1016,44 +909,76 @@ async def ocr_extract_drawing(
     request: Request,
     file: UploadFile = File(...),
     session_id: Optional[str] = Form(None),
+    apply_to_session: bool = Form(False),
+    expected_revision: Optional[str] = Header(None, alias="If-Match"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """'Phát triển Vision/OCR Model (GPT-4o) để trích xuất thông tin từ file
-    PDF/PNG bản vẽ' + 'tự điền dữ liệu bóc tách được vào ProjectData Model'
-    (Ngày 12-17). Nếu kèm session_id, tự động ghi đè vào ProjectData của
-    phiên đó; luôn trả JSON đã trích xuất để frontend autofill form."""
-    original_name = file.filename or "drawing"
-
-    # SECURITY FIX: cùng lỗi path traversal như upload_documents — sinh tên
-    # file bằng uuid4 qua whitelist, không nội suy filename người dùng gửi.
-    dest_path, stored_name = _generate_safe_storage_path(DRAWINGS_DIR, original_name, ALLOWED_DRAWING_EXTENSIONS)
-    content = await _read_upload_with_size_limit(file)
-    dest_path.write_bytes(content)
-
-    try:
-        extracted = await extract_project_data_from_drawing(str(dest_path), file.content_type or "")
-    except Exception as e:  # noqa: BLE001
-        # SECURITY FIX: không trả nguyên văn exception (có thể lộ traceback/nội
-        # bộ hệ thống) — log đầy đủ ở server, trả thông điệp chung cho client.
-        logger.error("Lỗi OCR bản vẽ: %s", e, exc_info=True)
-        raise HTTPException(status_code=500, detail="Lỗi trích xuất bản vẽ. Vui lòng thử lại hoặc liên hệ quản trị viên.")
-
+    """Preview OCR by default. Explicit apply_to_session=true opts into a
+    validated atomic write; the UI saves only after the user confirms."""
+    session = None
     if session_id:
+        await lock_session(db, session_id)
         session = await _load_session_full(db, session_id)
         if not session:
-            raise HTTPException(status_code=404, detail="Không tìm thấy phiên chat để áp dụng dữ liệu OCR.")
+            raise HTTPException(status_code=404, detail="Không tìm thấy phiên chat.")
         if user.role != "admin" and session.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Không có quyền chỉnh sửa hồ sơ của người khác.")
-        if not session.project_data:
-            session.project_data = ProjectData(session_id=session.id)
-            db.add(session.project_data)
-        session.project_data.apply_dict(extracted)
-        session.project_data.source = "ocr"
-        await db.commit()
-
-    # SECURITY FIX: không còn trả về URL công khai /data/drawings/... (mount đã bị xoá).
-    return {"extractedProjectInfo": extracted, "appliedToSession": bool(session_id)}
+        if apply_to_session:
+            _check_revision(session, expected_revision)
+    dest_path, _ = _generate_safe_storage_path(DRAWINGS_DIR, file.filename or "drawing", ALLOWED_DRAWING_EXTENSIONS)
+    content = await _read_upload_with_size_limit(file)
+    await run_in_threadpool(validate_upload, content, dest_path.suffix)
+    try:
+        await run_in_threadpool(dest_path.write_bytes, content)
+        extracted = await extract_project_data_from_drawing(str(dest_path), "")
+        if not isinstance(extracted, dict):
+            raise ValueError("OCR output must be an object")
+        current = session.project_data.to_dict() if session and session.project_data else {}
+        clean = sanitize_extracted_info(extracted, current, None)
+        accepted = clean["accepted"]
+        if extracted.get("components") is not None:
+            # Validate atomically: never silently discard or collapse an invalid building.
+            component_data = ProjectUpdateRequest.model_validate({"components": extracted["components"]})
+            accepted["components"] = component_data.model_dump(exclude_none=True)["components"]
+            accepted["componentsComplete"] = False
+            if accepted["components"]:
+                for key in ("type", "height", "pcccHeight", "floorArea", "totalFloorArea", "floors", "fireRating", "volume", "hazardClass", "industrialSubtype"):
+                    accepted.pop(key, None)
+        for key in ("volume", "hazardClass", "industrialSubtype"):
+            if not accepted.get("components") and extracted.get(key) is not None:
+                checked = ProjectUpdateRequest.model_validate({key: extracted[key]})
+                accepted[key] = checked.model_dump(exclude_none=True)[key]
+        for count_key, array_keys in (("floors", ("floorFunctions",)), ("basements", ("basementFunctions", "basementHeights", "basementAreas", "basementFootprints"))):
+            if count_key in accepted:
+                for key in array_keys:
+                    accepted[key] = (accepted.get(key, current.get(key)) or [])[:accepted[count_key]]
+        merged = ProjectUpdateRequest.model_validate({**current, **accepted})
+        if session and apply_to_session:
+            if not session.project_data:
+                session.project_data = ProjectData(session_id=session.id)
+                db.add(session.project_data)
+            session.project_data.apply_dict(merged.model_dump(exclude_none=True))
+            if "components" in accepted:
+                session.project_data.shared_systems = None
+                session.project_data.concurrent_design = None
+            session.project_data.source = "ocr"
+            session.updated_at = datetime.now(timezone.utc)
+            if not _is_reviewed(session):
+                _clear_review(session)
+            await db.commit()
+        return {"extractedProjectInfo": accepted, "appliedToSession": bool(session and apply_to_session), "rejectedFields": clean["rejected"], "coverage": extracted.get("_ocrCoverage")}
+    except HTTPException:
+        raise
+    except OCRInputError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+    except ValidationError:
+        raise HTTPException(status_code=422, detail="Dữ liệu OCR mâu thuẫn với hồ sơ. Vui lòng nhập tay để xác nhận.")
+    except Exception:
+        logger.exception("OCR không thành công")
+        raise HTTPException(status_code=502, detail="Dịch vụ OCR không sẵn sàng. Bạn có thể nhập thông số thủ công.")
+    finally:
+        dest_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1061,7 +986,7 @@ async def ocr_extract_drawing(
 # ---------------------------------------------------------------------------
 @app.get("/api/inspection-logs")
 async def list_inspection_logs(
-    session_id: Optional[str] = Query(None), limit: int = Query(50, le=200),
+    session_id: Optional[str] = Query(None), limit: int = Query(50, ge=1, le=200),
     db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
 ):
     stmt = select(InspectionLog).order_by(InspectionLog.created_at.desc()).limit(limit)
@@ -1105,28 +1030,49 @@ async def _resolve_export_data(body: dict, db: AsyncSession, user: User) -> tupl
     kết luận pháp lý từ chính session đó trên server (nguồn xác thực), bỏ
     qua hoàn toàn `checklist` client gửi — đảm bảo file xuất ra LUÔN khớp
     100% với dữ liệu đã chốt, không phụ thuộc client gửi đúng hay sai.
-    Nếu không có `sessionId` (client cũ chưa cập nhật), fallback dùng dữ
-    liệu client gửi như trước để không phá vỡ khả năng tương thích ngược.
+    sessionId và hồ sơ đã được kiểm duyệt là bắt buộc; không dùng dữ liệu
+    client để tạo kết luận hoặc fallback cho hồ sơ nháp.
     """
     session_id = body.get("sessionId")
+    if not isinstance(session_id, str) or not session_id or len(session_id) > 128:
+        raise HTTPException(status_code=422, detail="Cần sessionId hợp lệ để xuất báo cáo.")
     if session_id:
+        await lock_session(db, session_id)
         session = await _load_session_full(db, session_id)
         if not session:
             raise HTTPException(status_code=404, detail="Không tìm thấy phiên chat để xuất báo cáo.")
         if user.role != "admin" and session.owner_id != user.id:
             raise HTTPException(status_code=403, detail="Không có quyền xuất báo cáo của hồ sơ người khác.")
 
-        project_info = session.project_data.to_dict() if session.project_data else {}
-        checklist = session.checklist or []
-        conclusions = {
-            "isAppraisalRequired": session.is_subject_to_appraisal or False,
-            "reason": session.appraisal_reason or "",
-            "warnings": session.warnings or [],
-        }
-        return project_info, checklist, conclusions
+        _check_revision(session, body.get("expectedRevision"))
+        if not _is_reviewed(session):
+            raise HTTPException(status_code=409, detail="Hồ sơ chưa kiểm duyệt hoặc thông số đã thay đổi. Bấm Kiểm duyệt hồ sơ trước khi xuất báo cáo.")
 
-    # Fallback tương thích ngược (không có sessionId trong request)
-    return body.get("projectInfo") or {}, body.get("checklist") or [], body.get("conclusions") or {}
+        project_info = session.project_data.to_dict() if session.project_data else {}
+        payload = _session_to_dict(session)  # cached explicitly approved snapshot, no rule execution
+        if project_info.get("components"):
+            ignored = ("type", "floors", "basements", "height", "pcccHeight", "floorArea", "totalFloorArea", "fireRating", "volume", "hazardClass", "industrialSubtype")
+            legacy = {key: project_info.get(key) for key in ignored}
+            project_info = {**project_info, "assessmentScope": "components", "legacySingleBuildingInput": legacy,
+                            "type": "Dự án nhiều hạng mục — xem danh sách từng nhà", "fireRating": "", "hazardClass": "", "industrialSubtype": ""}
+            for key in ("floors", "basements", "height", "pcccHeight", "floorArea", "totalFloorArea", "volume"):
+                project_info[key] = 0
+        return project_info, payload["checklist"] or [], _export_conclusions(project_info, payload["warnings"] or [], payload["appraisalBasis"])
+
+    raise HTTPException(status_code=422, detail="sessionId là bắt buộc để xuất báo cáo từ hồ sơ đã lưu.")
+
+
+def _export_conclusions(project_info: dict, warnings: list, basis: dict) -> dict:
+    """Kết luận dùng cho báo cáo Word/PDF/JSON — cùng nguồn `appraisalBasis`
+    với giao diện, nên tiêu đề/lý do trong file xuất không thể khác màn hình."""
+    return {
+        "appraisalBasis": basis,
+        "status": basis["status"],
+        "isAppraisalRequired": basis["status"] == "required",
+        "reason": basis["conclusion"],
+        "basisText": f"Nhóm công năng áp dụng: {basis['categoryLabel']}. {basis['legalText']}",
+        "warnings": warnings,
+    }
 
 
 @app.post("/api/report/export")
@@ -1135,7 +1081,7 @@ async def export_report_docx(
 ):
     project_info, checklist, conclusions = await _resolve_export_data(body, db, user)
     try:
-        buffer = generate_pccc_report(project_info, checklist, conclusions)
+        buffer = await run_in_threadpool(generate_pccc_report, project_info, checklist, conclusions)
         filename = f"Tu_van_PCCC_{str(project_info.get('name', '')).replace(' ', '_')}.docx"
         return Response(
             content=buffer, media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -1155,7 +1101,7 @@ async def export_report_pdf(
     project_info, checklist, conclusions = await _resolve_export_data(body, db, user)
     try:
         filename = f"Tu_van_PCCC_{str(project_info.get('name', '')).replace(' ', '_')}.pdf"
-        pdf_bytes = generate_compliance_report_pdf(project_info, checklist, conclusions)
+        pdf_bytes = await run_in_threadpool(generate_compliance_report_pdf, project_info, checklist, conclusions)
         return Response(
             content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f"attachment; filename={quote(filename)}"},

@@ -122,7 +122,7 @@ def generate_pccc_report(
     _input_row(
         input_table,
         "Đơn vị thiết kế / Giai đoạn",
-        f"{project.get('designer') or 'Chưa cập nhật'} / {project.get('stage') or 'Thiết kế cơ sở'}",
+        f"{project.get('designer') or 'Chưa cập nhật'} / {project.get('stage') or 'Chưa cập nhật'}",
     )
     _input_row(input_table, "Loại công trình & Công năng", project.get("type", ""))
     # FIX B21 (Bao_Cao_QA_Lan_3.md — Thấp): trước đây khi length/width = 0
@@ -153,31 +153,35 @@ def generate_pccc_report(
     )
     _set_col_widths(input_table, [35, 65])
 
+    if project.get("components"):
+        _add_paragraph(doc, "DANH SÁCH HẠNG MỤC ĐỘC LẬP — KHÔNG GỘP QUY MÔ", bold=True, size=22)
+        for c in project["components"]:
+            _add_paragraph(doc, f"{c['name']} — {c.get('type') or 'Chưa rõ công năng'}; {c.get('floors') or '?'} tầng; cao {c.get('height') or '?'} m; tổng sàn {c.get('totalFloorArea') or '?'} m²; khối tích {c.get('volume') or '?'} m³; hạng {c.get('hazardClass') or '?'}; bậc chịu lửa {c.get('fireRating') or '?'}. Nguồn: {c.get('sourceText') or 'Nhập tay'}", size=20)
+
     # ---- II. Conclusion ----
-    _add_paragraph(doc, "II. KẾT LUẬN VỀ THẨM DUYỆT THIẾT KẾ PCCC", bold=True, size=24, color="1F4E79", space_after=120)
+    _add_paragraph(doc, "II. KẾT QUẢ RÀ SOÁT QUY ĐỊNH PCCC", bold=True, size=24, color="1F4E79", space_after=120)
 
-    p = doc.add_paragraph()
-    _run(p, "Căn cứ pháp lý chính: ", bold=True, size=22)
-    _run(
-        p,
-        "Bộ luật PCCC, Nghị định số 105/2025/NĐ-CP ngày 15/5/2025 - Phụ lục III (Danh mục dự án, công trình "
-        "thuộc diện thẩm định thiết kế về phòng cháy và chữa cháy).",
-        size=22,
-    )
-
-    status_text = (
-        "✓ CÔNG TRÌNH KHÔNG THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BỞI CƠ QUAN CÔNG AN"
-        if is_no_appraisal
-        else "✗ CÔNG TRÌNH THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BẮT BUỘC BỞI CƠ QUAN CÔNG AN"
-    )
-    _add_paragraph(
-        doc, status_text, bold=True, size=24,
-        color="385723" if is_no_appraisal else "C00000",
-    )
+    # FIX ("lý do sai" theo ảnh chụp): tiêu đề theo 3 trạng thái thật thay vì
+    # nhị phân — hồ sơ chưa đủ thông số không được in "KHÔNG THUỘC DIỆN".
+    verdict_status = conclusions.get("status") or ("not_required" if is_no_appraisal else "required")
+    if verdict_status == "insufficient_data":
+        status_text = "⚠ CẦN BỔ SUNG DỮ LIỆU / XÁC NHẬN PHÂN LOẠI PCCC"
+        status_color = "B45F06"
+    elif verdict_status == "not_required":
+        status_text = "✓ DƯỚI NGƯỠNG DANH MỤC ĐÃ XÉT; CẦN XÁC NHẬN PHẠM VI"
+        status_color = "385723"
+    else:
+        status_text = "✗ THUỘC DIỆN THẨM ĐỊNH THIẾT KẾ VỀ PCCC THEO NGƯỠNG QUY MÔ"
+        status_color = "C00000"
+    _add_paragraph(doc, status_text, bold=True, size=24, color=status_color)
 
     p = doc.add_paragraph()
     _run(p, "Lý do / Giải trình: ", bold=True, size=22)
     _run(p, conclusions.get("reason", ""), size=22)
+    if conclusions.get("basisText"):
+        p2 = doc.add_paragraph()
+        _run(p2, "Quy định đã đối chiếu / tình trạng căn cứ: ", bold=True, size=22)
+        _run(p2, conclusions["basisText"], size=22)
 
     warnings = conclusions.get("warnings") or []
     if warnings:
@@ -228,8 +232,8 @@ def generate_pccc_report(
     _add_paragraph(doc, "IV. DANH MỤC CĂN CỨ VÀ KÝ XÁC NHẬN TƯ VẤN", bold=True, size=24, color="1F4E79", space_after=120)
     _add_paragraph(
         doc,
-        "Các văn bản đối chiếu đã áp dụng: Nghị định số 105/2025/NĐ-CP; QCVN 06:2022/BXD Sửa đổi 1:2023; "
-        "QCVN 10:2025/BCA; TCVN 13456:2022; TCVN 7435-1:2004; TCVN 7568-14:2025.",
+        "Danh mục tham khảo: kỹ sư cần xác nhận toàn văn, hiệu lực và điều khoản áp dụng trước khi ký. Các hạng mục chưa có bằng chứng không được xem là đạt yêu cầu."
+        ,
         italic=True, size=20, space_after=240,
     )
 

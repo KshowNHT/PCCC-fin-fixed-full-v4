@@ -148,8 +148,8 @@ class ProjectData(Base):
     location: Mapped[str] = mapped_column(String(500), default="")
     investor: Mapped[str] = mapped_column(String(255), default="")
     designer: Mapped[str] = mapped_column(String(255), default="")
-    stage: Mapped[str] = mapped_column(String(255), default="Thiết kế cơ sở")
-    type: Mapped[str] = mapped_column(String(255), default="Nhà ở riêng lẻ kết hợp kinh doanh")
+    stage: Mapped[str] = mapped_column(String(255), default="")
+    type: Mapped[str] = mapped_column(String(255), default="")
 
     length: Mapped[float] = mapped_column(Float, default=0)
     width: Mapped[float] = mapped_column(Float, default=0)
@@ -159,7 +159,7 @@ class ProjectData(Base):
     total_floor_area: Mapped[float] = mapped_column(Float, default=0)
     floors: Mapped[int] = mapped_column(Integer, default=0)
     basements: Mapped[int] = mapped_column(Integer, default=0)
-    fire_rating: Mapped[str] = mapped_column(String(32), default="Bậc III")
+    fire_rating: Mapped[str] = mapped_column(String(32), default="")
     commercial_details: Mapped[str] = mapped_column(Text, default="")
 
     floor_functions: Mapped[list | None] = mapped_column(JSON, nullable=True)
@@ -167,6 +167,14 @@ class ProjectData(Base):
     basement_heights: Mapped[list | None] = mapped_column(JSON, nullable=True)
     basement_areas: Mapped[list | None] = mapped_column(JSON, nullable=True)
     basement_footprints: Mapped[list | None] = mapped_column(JSON, nullable=True)
+
+    components: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    components_complete: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    shared_systems: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    concurrent_design: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hazard_class: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    industrial_subtype: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     # Nguồn gốc dữ liệu: "manual" (nhập tay) hay "ocr" (AI đọc bản vẽ tự động, Ngày 12-17)
     source: Mapped[str] = mapped_column(String(16), default="manual")
@@ -177,6 +185,9 @@ class ProjectData(Base):
     session: Mapped["ChatSession"] = relationship(back_populates="project_data")
 
     FIELD_MAP = {
+        "components": "components", "componentsComplete": "components_complete",
+        "sharedSystems": "shared_systems", "concurrentDesign": "concurrent_design",
+        "volume": "volume", "hazardClass": "hazard_class", "industrialSubtype": "industrial_subtype",
         "name": "name", "location": "location", "investor": "investor", "designer": "designer",
         "stage": "stage", "type": "type", "length": "length", "width": "width", "height": "height",
         "pcccHeight": "pccc_height", "floorArea": "floor_area", "totalFloorArea": "total_floor_area",
@@ -219,12 +230,15 @@ class InspectionLog(Base):
     def to_dict(self) -> dict:
         non_compliant = sum(1 for c in (self.checklist_snapshot or []) if c.get("result") == "Không đạt")
         compliant = sum(1 for c in (self.checklist_snapshot or []) if c.get("result") == "Đạt")
+        first_result = (self.checklist_snapshot[0].get("result") if self.checklist_snapshot else None)
+        status = {"Thuộc diện thẩm định": "required", "Dưới ngưỡng danh mục": "not_required"}.get(first_result, "insufficient_data")
         return {
             "id": self.id,
             "sessionId": self.session_id,
             "triggerSource": self.trigger_source,
             "isSubjectToAppraisal": self.is_subject_to_appraisal,
             "appraisalReason": self.appraisal_reason,
+            "appraisalStatus": status,
             "checklist": self.checklist_snapshot,
             "warnings": self.warnings,
             "compliantCount": compliant,

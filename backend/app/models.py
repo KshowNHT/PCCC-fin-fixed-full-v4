@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 from pydantic import BaseModel, Field
+from app.schemas_project import BuildingComponent
 
 
 class ProjectInfo(BaseModel):
@@ -10,8 +11,8 @@ class ProjectInfo(BaseModel):
     location: str = ""
     investor: str = ""
     designer: str = ""
-    stage: str = "Thiết kế cơ sở"
-    type: str = "Nhà ở riêng lẻ kết hợp kinh doanh"
+    stage: str = ""
+    type: str = ""
     length: float = 0
     width: float = 0
     height: float = 0
@@ -20,7 +21,7 @@ class ProjectInfo(BaseModel):
     totalFloorArea: float = 0
     floors: int = 0
     basements: int = 0
-    fireRating: str = "Bậc III"
+    fireRating: str = ""
     commercialDetails: str = ""
     floorFunctions: Optional[List[str]] = None
     basementFunctions: Optional[List[str]] = None
@@ -91,6 +92,10 @@ class ChecklistItemAI(BaseModel):
 
 
 class ExtractedProjectInfo(BaseModel):
+    components: List[BuildingComponent] = Field(description="Tất cả các nhà/hạng mục độc lập; kể cả hồ sơ một nhà phải có một phần tử. Không chứa dòng tổng hợp.")
+    volume: Optional[float] = None
+    hazardClass: Optional[str] = None
+    industrialSubtype: Optional[str] = None
     name: Optional[str] = None
     location: Optional[str] = None
     investor: Optional[str] = None

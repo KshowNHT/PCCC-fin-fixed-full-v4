@@ -1,3 +1,4 @@
+# Production stack. Public entry: Caddy HTTPS only. Configure .env first.
 services:
   postgres:
     image: postgres:16-alpine
@@ -5,102 +6,97 @@ services:
     environment:
       POSTGRES_DB: pccc_db
       POSTGRES_USER: pccc_app
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pccc_dev_pass}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pccc_app -d pccc_db"]
+      test: [CMD-SHELL, 'pg_isready -U pccc_app -d pccc_db']
       interval: 5s
       timeout: 5s
       retries: 20
-      start_period: 10s
-    # FIX (rà soát cuối cùng trước bàn giao): trước đây KHÔNG service nào có
-    # giới hạn tài nguyên — 1 container bị leak/quá tải (bug lạ, truy vấn
-    # nặng bất thường, PDF/DOCX cỡ lớn...) có thể chiếm hết RAM/CPU của cả
-    # VPS, làm SẬP LUÔN các service khác (kể cả hệ điều hành host nếu VPS
-    # nhỏ). Đặt giới hạn khởi điểm hợp lý cho quy mô đội ngũ nhỏ (<=10 nhân
-    # viên theo hợp đồng) — CẦN CHỈNH LẠI theo cấu hình VPS thật khi deploy
-    # (xem RAM/CPU thật của gói VPS trước khi đặt số cụ thể).
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-          cpus: "1.0"
+    mem_limit: 1g
+    cpus: 1
+    networks: [pccc]
 
   backend:
-    build:
-      context: ./backend
+    build: ./backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql+asyncpg://pccc_app:${POSTGRES_PASSWORD:-pccc_dev_pass}@postgres:5432/pccc_db
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      JWT_SECRET: ${JWT_SECRET:-CHANGE_ME_IN_PRODUCTION_pccc_secret_key}
-      # FIX (rà soát lần 2): 3 biến dưới đây đã có sẵn trong code từ các lần
-      # vá bảo mật trước (CORS configurable, giới hạn upload, hạn JWT) nhưng
-      # trước đây CHỈ được thêm vào docker-compose.yml — 1 file KHÔNG được
-      # run-docker.bat/stop-docker.bat/logs-docker.bat dùng tới (chúng chỉ
-      # gọi compose.yaml). Nghĩa là toàn bộ 3 cấu hình này CHƯA TỪNG có tác
-      # dụng thật trên máy bạn cho tới bản vá này.
-      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-480}
-      PCCC_ALLOWED_ORIGINS: ${PCCC_ALLOWED_ORIGINS:-http://localhost:5173}
-      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-25}
+      DATABASE_URL: postgresql+asyncpg://pccc_app:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/pccc_db
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
       PCCC_ADMIN_USERNAME: ${PCCC_ADMIN_USERNAME:-admin}
-      PCCC_ADMIN_PASSWORD: ${PCCC_ADMIN_PASSWORD:-admin123}
+      PCCC_ADMIN_PASSWORD: ${PCCC_ADMIN_PASSWORD:?Set PCCC_ADMIN_PASSWORD}
+      PCCC_ALLOWED_ORIGINS: https://${PCCC_DOMAIN:?Set PCCC_DOMAIN}
+      JWT_EXPIRE_MINUTES: ${JWT_EXPIRE_MINUTES:-120}
+      MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-25}
       MAX_STAFF_ACCOUNTS: ${MAX_STAFF_ACCOUNTS:-10}
-      NODE_ENV: ${NODE_ENV:-production}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODELS: ${GEMINI_MODELS:-gemini-3.8-flash}
+      NODE_ENV: production
       PORT: 3000
       PCCC_DATA_DIR: /app/data
-    ports:
-      - "8000:3000"
+      PCCC_USE_MIGRATIONS: 'true'
     volumes:
       - pccc_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: [CMD, curl, -fsS, 'http://localhost:3000/api/ready']
       interval: 15s
       timeout: 5s
       retries: 10
-      start_period: 20s
-    # Backend là service nặng nhất (xử lý PDF/DOCX, gọi Gemini, chạy Python) —
-    # cấp nhiều tài nguyên nhất trong 3 service.
-    deploy:
-      resources:
-        limits:
-          memory: 768M
-          cpus: "1.5"
+      start_period: 30s
+    mem_limit: 1g
+    cpus: 1.5
+    networks: [pccc]
 
   frontend:
     build:
       context: ./frontend
       args:
-        # FIX NGHIÊM TRỌNG (rà soát "sẵn sàng chạy online"): mặc định trước
-        # đây là "http://localhost:8000" — bị đóng cứng vào bundle JS, khiến
-        # app KHÔNG hoạt động khi deploy lên domain thật (trình duyệt của
-        # người dùng khác sẽ gọi nhầm về "localhost" của chính họ). Để trống
-        # mặc định = dùng đường dẫn tương đối "/api/...", tự động đúng trên
-        # mọi domain/IP nhờ Nginx proxy (xem frontend/nginx.conf). Xem chú
-        # thích đầy đủ trong frontend/Dockerfile.
-        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-        # Bổ sung: "khoá chặn" DevTools cho tài khoản test (mặc định tắt,
-        # xem chú thích đầy đủ trong frontend/src/lib/codeProtection.ts và
-        # .env.example). Đặt VITE_ENABLE_CODE_PROTECTION=true trong .env nếu
-        # deploy bản demo/nghiệm thu chia sẻ username/password ra bên ngoài.
-        VITE_ENABLE_CODE_PROTECTION: ${VITE_ENABLE_CODE_PROTECTION:-false}
+        VITE_API_BASE_URL: ''
+        VITE_ENABLE_CODE_PROTECTION: 'false'
     restart: unless-stopped
-    ports:
-      - "5173:80"
+    security_opt: [no-new-privileges:true]
     depends_on:
       backend:
         condition: service_healthy
-    # Nginx tĩnh — rất nhẹ, giới hạn thấp vẫn dư dùng cho quy mô đội nhỏ.
-    deploy:
-      resources:
-        limits:
-          memory: 128M
-          cpus: "0.5"
+    mem_limit: 128m
+    cpus: 0.5
+    networks: [pccc]
+
+  edge:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      PCCC_DOMAIN: ${PCCC_DOMAIN:?Set PCCC_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [frontend]
+    mem_limit: 256m
+    cpus: 0.5
+    networks: [pccc]
 
 volumes:
   postgres_data:
   pccc_data:
+  caddy_data:
+  caddy_config:
+networks:
+  pccc:
+    ipam:
+      config:
+        - subnet: 172.28.76.0/24

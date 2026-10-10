@@ -1,0 +1,52 @@
+import './jsdom_setup';
+import React, { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import assert from 'node:assert/strict';
+import { MainArea } from '../src/components/MainArea';
+import { Sidebar } from '../src/components/Sidebar';
+import { InspectionLogPanel } from '../src/components/InspectionLogPanel';
+const g:any=globalThis;
+const tick=async()=>{await act(async()=>{await new Promise(r=>setTimeout(r,0));});};
+const response=(body:any,status=200)=>new Response(JSON.stringify(body),{status,headers:{'Content-Type':'application/json'}});
+async function run(){
+ localStorage.setItem('pccc_token','qa-token');
+ let authorization='',downloaded=false;
+ g.fetch=async(url:string,options:any)=>{authorization=options.headers.get('Authorization');return response({pdf:true});};
+ window.URL.createObjectURL=()=>{downloaded=true;return 'blob:test';}; window.URL.revokeObjectURL=()=>{};
+ g.window.HTMLAnchorElement.prototype.click=function(){};
+ const root=createRoot(document.getElementById('root')!);
+ const props:any={project:{name:'',type:'Nhà xưởng sản xuất',floors:0,basements:0},documents:[{id:'doc',code:'QA',title:'Tài liệu',type:'TCVN',content:'QA'}],sessions:[],activeSessionId:'A',isPending:false,isSidebarOpen:true,onUpdateProject:()=>{},onUploadDocument:async()=>[],onDeleteDocument:()=>{},onResetDocuments:()=>{},onSelectSession:()=>{},onCreateSession:()=>{},onDeleteSession:()=>{},onTriggerAppraisal:()=>{},setIsSidebarOpen:()=>{}};
+ await act(async()=>{root.render(<Sidebar {...props}/>);});
+ assert.equal((document.querySelector('#input-type') as HTMLSelectElement).value,'Nhà xưởng sản xuất');
+ await act(async()=>{root.render(<Sidebar {...props} project={{...props.project,floors:2,basements:1}}/>);});
+ const selectors=[...document.querySelectorAll('select')].filter(s=>[...s.options].some(o=>o.textContent?.includes('Chưa nhập công năng')));
+ assert.equal(selectors.length,3);assert.ok(selectors.every(s=>s.value===''));
+ console.log('PASS S25: unspecified floor/basement functions stay unknown, never default residential/garage');
+ await act(async()=>{document.querySelector('[title="Tải xuống tài liệu PDF"]')!.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));});await tick();
+ assert.equal(authorization,'Bearer qa-token');assert.ok(downloaded);
+ console.log('PASS S10: OCR custom type displayed; document download includes JWT');
+ // Late session-scoped response cannot replace the all-project response.
+ let completeOld:any;
+ g.fetch=async(url:string)=>url.includes('/sessions/')?await new Promise(r=>completeOld=()=>r(response([{id:'old',createdAt:'2026-10-08',appraisalStatus:'required'}]))):response([{id:'new',createdAt:'2026-10-08',appraisalStatus:'insufficient_data',compliantCount:0,nonCompliantCount:0}]);
+ await act(async()=>{root.render(<InspectionLogPanel sessionId="A" onClose={()=>{}}/>);});
+ await act(async()=>{[...document.querySelectorAll('button')].find(b=>b.textContent==='Toàn bộ hồ sơ')!.click();});await tick();
+ await act(async()=>{completeOld();});await tick();
+ assert.ok(document.body.textContent!.includes('Cần rà soát / chưa đủ căn cứ'));
+ assert.ok(!document.body.textContent!.includes('Thuộc diện thẩm định'));
+ console.log('PASS S11: late history response ignored; missing basis is not exemption');
+ // Error JSON is not used as an array and cannot crash the panel.
+ g.fetch=async()=>response({detail:'upstream failed'},503);
+ await act(async()=>{root.render(<InspectionLogPanel key="error" sessionId="A" onClose={()=>{}}/>);});await tick();
+ assert.ok(document.querySelector('[role="alert"]')!.textContent!.includes('Không tải được'));
+ console.log('PASS S12: history HTTP failure renders error without crash');
+ const noop=()=>{};
+ await act(async()=>{root.render(<MainArea sessionTitle="QA" reviewState="draft" messages={[]} onSendMessage={noop} onTriggerAppraisal={noop} isPending={false} checklist={[]} isSubjectToAppraisal={false} appraisalReason="Chưa kiểm duyệt" appraisalBasis={null} warnings={[]} projectInfo={{...props.project,floors:5,floorArea:100,totalFloorArea:9999}} onExportReport={noop} isExporting={false} onExportReportPdf={noop} isExportingPdf={false} isSidebarOpen={false} onToggleSidebar={noop}/>);});
+ assert.ok(document.body.textContent!.includes('Bản nháp — chưa rà soát'));
+ const verdict=[...document.querySelectorAll('button')].find(b=>b.textContent?.includes('Kết luận Pháp lý PCCC'))!;
+ await act(async()=>{verdict.click();});
+ assert.equal(document.getElementById('verdict-badge-card'),null);
+ assert.ok(!document.body.textContent!.includes('Tổng diện tích sàn khai báo không trùng khớp'));
+ console.log('PASS S24: unfinished draft renders instruction, no legal verdict or automatic area review');
+ await act(async()=>root.unmount());
+}
+run().then(()=>{window.close();process.exit(0);}).catch(e=>{console.error(e);process.exit(1);});

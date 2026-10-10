@@ -1,0 +1,261 @@
+"""Kiểm thử lớp bảo vệ AI (app/ai_guard.py): chạy `python3 tests/test_ai_guard.py` hoặc pytest.
+
+Phần A: số liệu AI trích xuất — chỉ nhận khi hợp lệ + có trong lời người dùng.
+Phần B: câu trả lời chat của AI — câu mâu thuẫn với kết luận tính cứng bị lược bỏ.
+Phần C: fuzz tính chất (bất biến phải đúng với MỌI đầu vào ngẫu nhiên).
+Kỳ vọng được viết tay từ quy tắc nghiệp vụ, không sao chép từ kết quả chạy.
+"""
+import os
+import random
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from app.ai_guard import (  # noqa: E402
+    ALLOWED_FLOOR_FUNCTIONS, KNOWN_RATINGS, guard_reply, guard_warnings, numbers_in_text, sanitize_extracted_info,
+)
+from app.appraisal_basis import to_number  # noqa: E402
+from app.rules_engine import evaluate_appraisal  # noqa: E402
+from app.schemas_project import ProjectUpdateRequest  # noqa: E402
+
+MIXED = "Nhà ở riêng lẻ kết hợp kinh doanh"
+KARAOKE = "Cơ sở kinh doanh Karaoke, Vũ trường"
+EMPTY = {"type": MIXED, "floors": 0, "totalFloorArea": 0, "floorArea": 0, "pcccHeight": 0, "fireRating": "Bậc III",
+         "name": "Dự án mới", "commercialDetails": "", "floorFunctions": []}
+
+
+def cur(**kw):
+    d = dict(EMPTY)
+    d.update(kw)
+    return d
+
+
+# (id, mô tả, AI trích xuất, hồ sơ hiện tại, lời người dùng, kỳ vọng)
+# kỳ vọng: accepted = dict phải có đúng các cặp này; rejected_n = số mục bị từ chối; derived_n
+A_CASES = [
+    ("E01", "AI bịa 12 tầng trong khi người dùng nói 5 tầng", {"floors": 12}, cur(), "Nhà 5 tầng", dict(accepted={}, rejected_n=1)),
+    ("E02", "5 tầng có trong lời người dùng", {"floors": 5}, cur(), "Nhà 5 tầng, 500 m2", dict(accepted={"floors": 5})),
+    ("E03", "số chữ 'năm tầng'", {"floors": 5}, cur(), "nhà năm tầng", dict(accepted={"floors": 5})),
+    ("E04", "số chữ 'mười hai tầng'", {"floors": 12}, cur(), "tòa nhà mười hai tầng", dict(accepted={"floors": 12})),
+    ("E05", "AI ghi đè số tầng người dùng đã nhập (5->8) mà lời không nhắc 8", {"floors": 8}, cur(floors=5, totalFloorArea=500), "Kiểm tra giúp tôi", dict(accepted={}, rejected_n=1)),
+    ("E06", "AI nhắc lại đúng giá trị hiện tại -> im lặng", {"floors": 5}, cur(floors=5), "ok", dict(accepted={}, rejected_n=0)),
+    ("E07", "số tầng âm", {"floors": -3}, cur(), "-3 tầng", dict(accepted={}, rejected_n=1)),
+    ("E08", "9999 tầng dù lời người dùng có 9999", {"floors": 9999}, cur(), "nhà 9999 tầng", dict(accepted={}, rejected_n=1)),
+    ("E09", "số tầng không nguyên 5.5", {"floors": 5.5}, cur(), "5.5 tầng", dict(accepted={}, rejected_n=1)),
+    ("E10", "diện tích dạng chuỗi '500'", {"totalFloorArea": "500"}, cur(), "tổng diện tích 500 m2", dict(accepted={"totalFloorArea": 500.0})),
+    ("E11", "tổng sàn do AI tính = 5 tầng × 100 m2", {"totalFloorArea": 500}, cur(floors=5, floorArea=100), "5 tầng, mỗi tầng 100 m2", dict(accepted={"totalFloorArea": 500.0}, derived_n=1)),
+    ("E12", "tổng sàn AI tự đưa ra 700 không khớp 5×100", {"totalFloorArea": 700}, cur(floors=5, floorArea=100), "5 tầng, mỗi tầng 100 m2", dict(accepted={}, rejected_n=1)),
+    ("E13", "vi phạm luật diện tích (4 tầng, 30 m2/tầng, tổng 50) dù có trong lời", {"floors": 4, "floorArea": 30, "totalFloorArea": 50}, cur(), "4 tầng, 30 m2, tổng 50 m2", dict(check_valid=True)),
+    ("E14", "bậc chịu lửa 'Bậc II' có trong lời ('bậc 2')", {"fireRating": "Bậc II"}, cur(), "bậc 2 nhé", dict(accepted={"fireRating": "Bậc II"})),
+    ("E15", "bậc chịu lửa AI tự thêm", {"fireRating": "Bậc II"}, cur(), "nhà 5 tầng", dict(accepted={}, rejected_n=1)),
+    ("E16", "bậc chịu lửa không tồn tại", {"fireRating": "Bậc VI"}, cur(), "bậc VI", dict(accepted={}, rejected_n=1)),
+    ("E17", "AI tự đổi loại công trình thành karaoke", {"type": "Karaoke"}, cur(), "Nhà 5 tầng 500 m2", dict(accepted={}, rejected_n=1)),
+    ("E18", "karaoke có trong lời -> nhận và chuẩn hoá theo dropdown", {"type": "Quán karaoke"}, cur(), "tôi mở quán karaoke", dict(accepted={"type": KARAOKE})),
+    ("E19", "loại công trình vô nghĩa", {"type": "xyz abc"}, cur(), "xyz abc", dict(accepted={}, rejected_n=1)),
+    ("E20", "cùng nhóm với hiện tại -> im lặng", {"type": "Nhà ở kết hợp kinh doanh"}, cur(), "ok", dict(accepted={}, rejected_n=0)),
+    ("E21", "AI ghi 'karaoke' vào chi tiết kinh doanh dù lời không nói", {"commercialDetails": "Tầng 1 karaoke"}, cur(), "Tầng 1 kinh doanh", dict(accepted={}, rejected_n=1)),
+    ("E22", "điền chi tiết kinh doanh khi đang trống", {"commercialDetails": "Tầng 1 tạp hóa"}, cur(), "tầng 1 tạp hóa", dict(accepted={"commercialDetails": "Tầng 1 tạp hóa"})),
+    ("E23", "không ghi đè chi tiết kinh doanh người dùng đã nhập", {"commercialDetails": "Khác hẳn"}, cur(commercialDetails="Tầng 1 tạp hóa"), "ok", dict(accepted={}, rejected_n=1)),
+    ("E24a", "không ghi đè tên công trình đã đặt", {"name": "Tên AI"}, cur(name="Nhà ông A"), "ok", dict(accepted={}, rejected_n=1)),
+    ("E24b", "điền tên khi còn là 'Dự án mới'", {"name": "Nhà ông A"}, cur(), "nhà ông A", dict(accepted={"name": "Nhà ông A"})),
+    ("E25", "công năng tầng viết tự do được ánh xạ về giá trị dropdown", {"floorFunctions": ["Cửa hàng tạp hóa", "Nhà ở"]}, cur(floors=2), "tầng 1 cửa hàng",
+     dict(accepted={"floorFunctions": ["Kinh doanh thương mại / Dịch vụ nhẹ", "Nhà ở riêng lẻ / Dân dụng"]})),
+    ("E26", "công năng tầng có karaoke nhưng lời không nhắc", {"floorFunctions": ["Karaoke", "Nhà ở"]}, cur(floors=2), "tầng 1 và 2", dict(accepted={}, rejected_n=1)),
+    ("E27", "công năng tầng không nhận diện được", {"floorFunctions": ["Sân bay vũ trụ"]}, cur(floors=1), "ok", dict(accepted={}, rejected_n=1)),
+    ("E28a", "extracted = None", None, cur(), "ok", dict(accepted={}, rejected_n=0)),
+    ("E28b", "extracted không phải dict", "hello", cur(), "ok", dict(accepted={}, rejected_n=0)),
+    ("E29", "nguồn OCR (không có lời người dùng): số hợp lệ được nhận", {"floors": 6, "totalFloorArea": 1800}, cur(), None, dict(accepted={"floors": 6, "totalFloorArea": 1800.0})),
+    ("E29b", "nguồn OCR: số ngoài khoảng bị chặn", {"floors": 600}, cur(), None, dict(accepted={}, rejected_n=1)),
+    ("E30", "hồ sơ hiện tại đã lệch sẵn: số hợp lệ mới vẫn được nhận", {"pcccHeight": 12}, cur(floors=4, floorArea=30, totalFloorArea=50), "cao 12m", dict(accepted={"pcccHeight": 12.0})),
+    ("E31", "chiều cao 5000 m", {"pcccHeight": 5000}, cur(), "cao 5000 m", dict(accepted={}, rejected_n=1)),
+    ("E32", "khoá lạ do AI bịa ra bị bỏ qua", {"isSubjectToAppraisal": True, "role": "admin"}, cur(), "ok", dict(accepted={}, rejected_n=0)),
+    ("E34", "'1.200 m2' trong lời, AI trả 1200", {"totalFloorArea": 1200}, cur(), "diện tích 1.200 m2", dict(accepted={"totalFloorArea": 1200.0})),
+    ("E35", "'12,5m' trong lời, AI trả 12.5", {"pcccHeight": 12.5}, cur(), "cao 12,5m", dict(accepted={"pcccHeight": 12.5})),
+]
+
+K = {"type": KARAOKE, "floors": 5, "totalFloorArea": 500, "floorArea": 100, "pcccHeight": 18, "fireRating": "Bậc II"}
+M5 = {"type": MIXED, "floors": 5, "totalFloorArea": 500, "floorArea": 100, "pcccHeight": 18, "fireRating": "Bậc II"}
+M8 = {"type": MIXED, "floors": 8, "totalFloorArea": 900, "floorArea": 112, "pcccHeight": 26, "fireRating": "Bậc II"}
+INS = {"type": MIXED, "floors": 5, "totalFloorArea": 0, "floorArea": 100, "pcccHeight": 18, "fireRating": "Bậc II"}
+
+# (id, mô tả, hồ sơ, câu trả lời AI, có vi phạm không, chuỗi phải còn lại, chuỗi phải bị loại)
+B_CASES = [
+    ("R01", "karaoke: nói 'vượt ngưỡng 7 tầng' (ĐÚNG LỖI TRONG ẢNH)", K, "Công trình của bạn đã vượt ngưỡng 7 tầng nên bắt buộc thẩm duyệt.", True, [], ["vượt ngưỡng"]),
+    ("R02", "karaoke: nêu đúng lý do công năng", K, "Công trình thuộc nhóm karaoke nên bắt buộc thẩm duyệt bất kể quy mô.", False, ["bất kể quy mô"], []),
+    ("R03", "karaoke: nói không thuộc diện", K, "Công trình không thuộc diện thẩm duyệt.", True, [], ["không thuộc diện"]),
+    ("R04", "nhà 5 tầng: nói bắt buộc thẩm duyệt", M5, "Công trình bắt buộc phải thẩm duyệt.", True, [], []),
+    ("R05", "nhà 5 tầng: nói đúng", M5, "Công trình không thuộc diện thẩm duyệt vì chưa đạt ngưỡng nào.", False, ["không thuộc diện"], []),
+    ("R06", "câu giả định không bị coi là khẳng định", M5, "Nếu vượt 7 tầng thì bắt buộc thẩm duyệt.", False, ["Nếu vượt"], []),
+    ("R07", "nêu sai số tầng của công trình", M5, "Công trình 12 tầng cần thêm cầu thang.", True, [], ["12 tầng"]),
+    ("R08", "nhắc ngưỡng 7 tầng không bị bắt nhầm", M5, "Công trình 5 tầng thấp hơn ngưỡng 7 tầng.", False, ["5 tầng"], []),
+    ("R09", "nêu sai tổng diện tích sàn", M5, "Tổng diện tích sàn 900 m² của công trình cần kiểm tra.", True, [], ["900"]),
+    ("R10", "đúng tổng diện tích sàn", M5, "Tổng diện tích sàn 500 m² của công trình.", False, ["500"], []),
+    ("R11", "nhà 8 tầng: nói dưới ngưỡng", M8, "Công trình dưới ngưỡng nên không cần thẩm duyệt.", True, [], []),
+    ("R12", "nhà 8 tầng: nói đúng", M8, "Số tầng 8 đạt ngưỡng 7 tầng nên bắt buộc thẩm duyệt.", False, ["đạt ngưỡng"], []),
+    ("R13", "thiếu số liệu: khẳng định không cần thẩm duyệt", INS, "Công trình không cần thẩm duyệt.", True, [], []),
+    ("R14", "thiếu số liệu: khẳng định bắt buộc", INS, "Công trình bắt buộc thẩm duyệt.", True, [], []),
+    ("R15", "thiếu số liệu: nêu đúng sự chưa chắc chắn", INS, "Chưa thể kết luận công trình có thuộc diện thẩm duyệt hay không.", False, ["Chưa thể kết luận"], []),
+    ("R16", "chỉ có một câu sai -> thay bằng kết luận hệ thống", K, "Công trình đã vượt ngưỡng.", True, ["Kết luận của hệ thống"], ["vượt ngưỡng"]),
+    ("R17", "markdown nhiều dòng: giữ câu đúng, bỏ câu sai", M5,
+     "**Nhận xét**\n- Công trình 5 tầng, 500 m².\n- Công trình đã vượt ngưỡng nên bắt buộc thẩm duyệt.\n- Cần bổ sung bản vẽ thoát nạn.", True,
+     ["Cần bổ sung bản vẽ thoát nạn", "5 tầng"], ["đã vượt ngưỡng"]),
+    ("R18", "karaoke: 'dù chưa đạt ngưỡng vẫn bắt buộc'", K, "Dù chưa đạt ngưỡng 7 tầng, công trình vẫn bắt buộc thẩm duyệt.", False, ["vẫn bắt buộc"], []),
+    ("R19", "nhà 5 tầng: 'không vượt ngưỡng nên không cần thẩm duyệt'", M5, "Công trình không vượt ngưỡng nên không cần thẩm duyệt.", False, ["không vượt"], []),
+    ("R20", "reply rỗng", K, "", False, [], []),
+    ("R21", "reply không liên quan thẩm duyệt", M5, "Bạn nên bố trí lối thoát nạn thứ hai và đèn EXIT.", False, ["đèn EXIT"], []),
+    ("R22", "nhà 8 tầng: nêu đúng số tầng", M8, "Công trình 8 tầng đã đạt ngưỡng số tầng.", False, ["8 tầng"], []),
+]
+
+
+def run_A():
+    errs = []
+    for cid, desc, extracted, current, text, exp in A_CASES:
+        r = sanitize_extracted_info(extracted, current, text)
+        if "accepted" in exp and r["accepted"] != exp["accepted"]:
+            errs.append(f"[{cid}] {desc}: accepted = {r['accepted']}, kỳ vọng {exp['accepted']}")
+        if "rejected_n" in exp and len(r["rejected"]) != exp["rejected_n"]:
+            errs.append(f"[{cid}] {desc}: số mục bị từ chối = {len(r['rejected'])}, kỳ vọng {exp['rejected_n']} ({r['rejected']})")
+        if "derived_n" in exp and len(r["derived"]) != exp["derived_n"]:
+            errs.append(f"[{cid}] {desc}: derived = {len(r['derived'])}, kỳ vọng {exp['derived_n']}")
+        if exp.get("check_valid"):
+            merged = {k: v for k, v in {**{f: current[f] for f in ("floors", "floorArea", "totalFloorArea", "pcccHeight") if to_number(current.get(f)) > 0}, **{k: v for k, v in r["accepted"].items() if k in ("floors", "floorArea", "totalFloorArea", "pcccHeight")}}.items()}
+            try:
+                ProjectUpdateRequest(**merged)
+            except Exception as exc:  # noqa: BLE001
+                errs.append(f"[{cid}] {desc}: sau khi lọc vẫn vi phạm luật dữ liệu: {exc}")
+        print(("PASS " if not any(e.startswith(f"[{cid}]") for e in errs) else "FAIL ") + f"{cid:5s} {desc}")
+    return errs
+
+
+def run_B():
+    errs = []
+    for cid, desc, project, reply, want_violation, must_keep, must_drop in B_CASES:
+        basis = evaluate_appraisal(project)["appraisalBasis"]
+        out, violations = guard_reply(reply, basis, project)
+        bad = []
+        if bool(violations) != want_violation:
+            bad.append(f"vi phạm={bool(violations)}, kỳ vọng {want_violation} ({violations})")
+        body = out.split("ℹ️ Hệ thống đã lược bỏ")[0]
+        for k in must_keep:
+            if k not in out:
+                bad.append(f"thiếu '{k}' trong kết quả")
+        for k in must_drop:
+            if k.lower() in body.lower():
+                bad.append(f"vẫn còn '{k}' trong phần giữ lại")
+        errs += [f"[{cid}] {desc}: {b}" for b in bad]
+        print(("PASS " if not bad else "FAIL ") + f"{cid:5s} {desc}")
+    return errs
+
+
+def run_C(n=4000, seed=7):
+    rnd = random.Random(seed)
+    errs = []
+    nums = [None, 0, -1, 1, 2, 3, 5, 7, 8, 12, 18, 25, 100, 500, 900, 1000, 3000, 9999, 5.5, "5", "500", "abc", float("nan"), 1e12]
+    texts = [None, "", "nhà 5 tầng 500 m2", "bậc II karaoke", "tầng 1 cửa hàng, 3 tầng, 1.200 m2 cao 12,5m", "mười hai tầng", "bậc 3"]
+    types = [None, "", KARAOKE, "Quán karaoke", "Kho hàng", "xyz", MIXED, "Chợ", 5]
+    for i in range(n):
+        current = {"type": rnd.choice([MIXED, KARAOKE, "", None]), "floors": rnd.choice([0, 3, 5, 8]), "totalFloorArea": rnd.choice([0, 500, 3000]),
+                   "floorArea": rnd.choice([0, 100]), "pcccHeight": rnd.choice([0, 18]), "fireRating": rnd.choice(["Bậc III", "Chưa lựa chọn", "Bậc II"]),
+                   "name": rnd.choice(["Dự án mới", "Nhà A", ""]), "commercialDetails": rnd.choice(["", "tạp hóa"]), "floorFunctions": []}
+        ai = {"floors": rnd.choice(nums), "totalFloorArea": rnd.choice(nums), "floorArea": rnd.choice(nums), "pcccHeight": rnd.choice(nums),
+              "height": rnd.choice(nums), "basements": rnd.choice(nums), "type": rnd.choice(types), "fireRating": rnd.choice([None, "Bậc II", "Bậc VI", "x"]),
+              "name": rnd.choice([None, "Tên AI"]), "commercialDetails": rnd.choice([None, "karaoke tầng 1", "kho"]),
+              "floorFunctions": rnd.choice([None, ["Karaoke"], ["Nhà ở", "Cửa hàng"], ["???"], [1, 2]]), "ghost": 1}
+        text = rnd.choice(texts)
+        try:
+            r = sanitize_extracted_info(ai, current, text)
+        except Exception as exc:  # noqa: BLE001
+            errs.append(f"[fuzzA#{i}] NGOẠI LỆ {type(exc).__name__}: {exc} | ai={ai}")
+            continue
+        acc = r["accepted"]
+        known = {"floors", "totalFloorArea", "floorArea", "pcccHeight", "height", "basements", "length", "width", "type", "fireRating", "name",
+                 "location", "investor", "designer", "stage", "commercialDetails", "floorFunctions"}
+        if not set(acc) <= known:
+            errs.append(f"[fuzzA#{i}] khoá lạ lọt vào accepted: {set(acc) - known}")
+        base_valid = True
+        try:
+            ProjectUpdateRequest(**{f: current[f] for f in ("floors", "floorArea", "totalFloorArea", "pcccHeight") if to_number(current.get(f)) > 0})
+        except Exception:  # noqa: BLE001
+            base_valid = False
+        if base_valid:
+            merged = {f: current[f] for f in ("floors", "floorArea", "totalFloorArea", "pcccHeight") if to_number(current.get(f)) > 0}
+            merged.update({k: v for k, v in acc.items() if k in ("floors", "floorArea", "totalFloorArea", "pcccHeight", "height", "basements", "length", "width")})
+            try:
+                ProjectUpdateRequest(**merged)
+            except Exception as exc:  # noqa: BLE001
+                errs.append(f"[fuzzA#{i}] hồ sơ sau khi nhận số AI vi phạm luật dữ liệu: {exc} | acc={acc} cur={current}")
+        if text is not None:
+            ns = numbers_in_text(text)
+            for f in ("floors", "floorArea", "pcccHeight", "height", "basements", "length", "width"):
+                if f in acc and not any(abs(float(acc[f]) - x) < 1e-6 for x in ns):
+                    errs.append(f"[fuzzA#{i}] {f}={acc[f]} được nhận nhưng không có trong lời người dùng '{text}'")
+            if "totalFloorArea" in acc and not any(abs(acc["totalFloorArea"] - x) < 1e-6 for x in ns):
+                fl = acc.get("floors", current["floors"])
+                fa = acc.get("floorArea", current["floorArea"])
+                if not (fl and fa and abs(acc["totalFloorArea"] - fl * fa) < 1e-6):
+                    errs.append(f"[fuzzA#{i}] totalFloorArea={acc['totalFloorArea']} không có căn cứ")
+        for f in ("name",):
+            if f in acc and str(current.get(f) or "").strip().lower() not in ("", "dự án mới"):
+                errs.append(f"[fuzzA#{i}] ghi đè {f} đã có")
+        if "commercialDetails" in acc and str(current.get("commercialDetails") or "").strip():
+            errs.append(f"[fuzzA#{i}] ghi đè commercialDetails đã có")
+        if "fireRating" in acc and acc["fireRating"] not in KNOWN_RATINGS:
+            errs.append(f"[fuzzA#{i}] fireRating lạ {acc['fireRating']}")
+        if "floorFunctions" in acc and not set(acc["floorFunctions"]) <= ALLOWED_FLOOR_FUNCTIONS:
+            errs.append(f"[fuzzA#{i}] floorFunctions ngoài danh sách")
+        if "type" in acc:
+            from app.appraisal_basis import classify_building
+            if classify_building({"type": acc["type"]})[0] == "unclassified":
+                errs.append(f"[fuzzA#{i}] type nhận về nhóm chưa xác định: {acc['type']}")
+        if text is not None and acc.get("floorFunctions") and any("Karaoke" in f for f in acc["floorFunctions"]) and not ("karaoke" in text.lower()):
+            errs.append(f"[fuzzA#{i}] nhận tầng karaoke mà lời người dùng không nhắc")
+        if text is not None and "type" in acc and "Karaoke" in acc["type"] and current.get("type") != KARAOKE and not ("karaoke" in text.lower()):
+            errs.append(f"[fuzzA#{i}] đổi sang karaoke mà lời người dùng không nhắc")
+        if len(errs) > 12:
+            break
+
+    # --- hệ thống không được tự bắt lỗi chính câu chữ của mình ---
+    types2 = [MIXED, KARAOKE, "Gara ô tô", "Nhà kho xếp giá đỡ kệ cao", "Chợ, Trung tâm thương mại", "Cơ sở giáo dục, trường học", "", "Công trình khác"]
+    for i in range(n):
+        proj = {"type": rnd.choice(types2), "floors": rnd.choice([0, 1, 2, 3, 4, 5, 6, 7, 8, 12]), "totalFloorArea": rnd.choice([0, 100, 500, 999, 1000, 1500, 2999, 3000, 9000]),
+                "floorArea": rnd.choice([0, 100]), "pcccHeight": rnd.choice([0, 8, 18, 25, 31]), "fireRating": rnd.choice(["Bậc II", "Bậc III", ""])}
+        ev = evaluate_appraisal(proj)
+        basis = ev["appraisalBasis"]
+        own = [basis["summary"], basis["conclusion"], basis["legalText"]] + [c["note"] for c in ev["checklist"]] + ev["warnings"]
+        for piece in own:
+            out, v = guard_reply(piece, basis, proj)
+            if v:
+                errs.append(f"[fuzzB#{i}] hệ thống tự bắt lỗi chính câu chữ của mình: {v} | '{piece[:90]}' | proj={proj}")
+                break
+        kept, dropped = guard_warnings(ev["warnings"], basis, proj)
+        if dropped:
+            errs.append(f"[fuzzB#{i}] guard_warnings loại cảnh báo của chính hệ thống | proj={proj}")
+        if len(errs) > 12:
+            break
+    print(("PASS " if not errs else "FAIL ") + f"fuzz tính chất ({n} đầu vào AI + {n} hồ sơ tự kiểm tra)")
+    return errs
+
+
+def test_extraction_cases():
+    assert not run_A()
+
+
+def test_reply_cases():
+    assert not run_B()
+
+
+def test_property_fuzz():
+    assert not run_C()
+
+
+if __name__ == "__main__":
+    print("=== A. SỐ LIỆU AI TRÍCH XUẤT ===")
+    errors = run_A()
+    print("\n=== B. CÂU TRẢ LỜI CHAT CỦA AI ===")
+    errors += run_B()
+    print("\n=== C. FUZZ TÍNH CHẤT ===")
+    errors += run_C()
+    for e in errors[:20]:
+        print("   ->", e[:420])
+    print(f"\nTỔNG LỖI: {len(errors)}")
+    sys.exit(1 if errors else 0)

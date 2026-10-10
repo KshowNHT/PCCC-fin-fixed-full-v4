@@ -22,8 +22,9 @@ DRAWINGS_DIR = DATA_DIR / "drawings"  # bản vẽ upload để OCR
 for _d in (DATA_DIR, UPLOADS_DIR, LEGAL_DB_DIR, DRAWINGS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
-REGULAR_FONT_PATH = DATA_DIR / "Roboto-Regular.ttf"
-BOLD_FONT_PATH = DATA_DIR / "Roboto-Medium.ttf"
+FONT_DIR = BASE_DIR / "fonts" if (BASE_DIR / "fonts").exists() else BASE_DIR / "data"
+REGULAR_FONT_PATH = FONT_DIR / "Roboto-Regular.ttf"
+BOLD_FONT_PATH = FONT_DIR / "Roboto-Medium.ttf"
 
 # --- AI ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
@@ -31,13 +32,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 # --- Database (PostgreSQL) ---
 # Theo kế hoạch Ngày 1: "Khởi tạo FastAPI, kết nối PostgreSQL."
 _INSECURE_DATABASE_URL_DEFAULT = "postgresql+asyncpg://pccc_app:pccc_dev_pass@localhost:5432/pccc_db"
-DATABASE_URL = os.environ.get("DATABASE_URL", _INSECURE_DATABASE_URL_DEFAULT).strip()
-if DATABASE_URL.startswith("postgres://"):
-    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+asyncpg://", 1)
-elif DATABASE_URL.startswith("postgresql://"):
-    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
-if "sslmode=" in DATABASE_URL:
-    DATABASE_URL = DATABASE_URL.replace("sslmode=", "ssl=")
+DATABASE_URL = os.environ.get("DATABASE_URL", _INSECURE_DATABASE_URL_DEFAULT)
 
 # --- Auth / JWT (Ngày 1: "Viết API Authentication + JWT") ---
 _INSECURE_JWT_DEFAULT = "CHANGE_ME_IN_PRODUCTION_pccc_secret_key"
@@ -93,7 +88,19 @@ def assert_production_secrets_are_safe() -> None:
         return
 
     problems = []
-    if JWT_SECRET == _INSECURE_JWT_DEFAULT or len(JWT_SECRET) < 32:
+    if not DATABASE_URL.startswith("postgresql+asyncpg://"):
+        problems.append("Production yêu cầu PostgreSQL asyncpg.")
+    if not 5 <= JWT_EXPIRE_MINUTES <= 480:
+        problems.append("JWT_EXPIRE_MINUTES phải từ 5 đến 480.")
+    if not 1 <= MAX_UPLOAD_SIZE_MB <= 25:
+        problems.append("MAX_UPLOAD_SIZE_MB phải từ 1 đến 25.")
+    if not ALLOWED_ORIGINS or any(not o.startswith("https://") or "*" in o for o in ALLOWED_ORIGINS):
+        problems.append("Production cần PCCC_ALLOWED_ORIGINS là danh sách HTTPS cụ thể.")
+    if len(DEFAULT_ADMIN_PASSWORD.encode("utf-8")) > 72:
+        problems.append("Mật khẩu admin tối đa 72 byte UTF-8.")
+    if not any(c.isalpha() for c in DEFAULT_ADMIN_PASSWORD) or not any(c.isdigit() for c in DEFAULT_ADMIN_PASSWORD):
+        problems.append("Mật khẩu admin cần chữ và số.")
+    if JWT_SECRET == _INSECURE_JWT_DEFAULT or len(JWT_SECRET) < 32 or any(marker in JWT_SECRET.upper() for marker in ("REPLACE", "CHANGE_ME", "EXAMPLE")):
         problems.append(
             "JWT_SECRET đang để giá trị mặc định hoặc quá ngắn (<32 ký tự). "
             "Tạo secret mới bằng: openssl rand -hex 32"
@@ -109,6 +116,15 @@ def assert_production_secrets_are_safe() -> None:
     # tuyệt đối) vì compose.yaml thật lại ghép chuỗi này với host khác
     # ("postgres" thay vì "localhost") khi POSTGRES_PASSWORD không được set
     # trong .env — so khớp tuyệt đối sẽ bỏ sót đúng kịch bản thật này.
+    from sqlalchemy.engine import make_url
+    try:
+        database_password = make_url(DATABASE_URL).password or ""
+        if len(database_password) < 16 or any(marker in database_password.upper() for marker in ("REPLACE", "CHANGE_ME", "EXAMPLE")):
+            problems.append("Mật khẩu PostgreSQL cần tối thiểu 16 ký tự và không dùng giá trị mẫu.")
+    except Exception:
+        problems.append("DATABASE_URL không hợp lệ.")
+    if MAX_STAFF_ACCOUNTS < 1:
+        problems.append("MAX_STAFF_ACCOUNTS phải là số dương.")
     if "pccc_dev_pass" in DATABASE_URL:
         problems.append(
             "DATABASE_URL/POSTGRES_PASSWORD đang dùng mật khẩu DB mẫu 'pccc_dev_pass'. "

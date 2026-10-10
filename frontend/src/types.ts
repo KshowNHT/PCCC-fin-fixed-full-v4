@@ -1,4 +1,17 @@
+export interface BuildingComponent {
+  id: string; name: string; type: string; floors: number; basements: number;
+  height: number; pcccHeight: number; floorArea: number; totalFloorArea: number;
+  volume: number; hazardClass: string; industrialSubtype: string; fireRating: string;
+  commercialDetails: string; sourcePages: number[]; sourceText: string;
+}
 export interface ProjectInfo {
+  components?: BuildingComponent[];
+  componentsComplete?: boolean | null;
+  sharedSystems?: boolean | null;
+  concurrentDesign?: boolean | null;
+  volume?: number | null;
+  hazardClass?: string | null;
+  industrialSubtype?: string | null;
   name: string;
   location: string;
   investor: string;
@@ -56,4 +69,34 @@ export interface AssessmentResult {
   checklist: ChecklistItem[];
   generalConclusion: string;
   warnings: string[];
+}
+
+/** Căn cứ pháp lý có cấu trúc do BACKEND tính (rules_engine/appraisal_basis.py).
+ * Giao diện chỉ hiển thị — không tự suy luận ngưỡng hay câu kết luận pháp lý. */
+export type AppraisalStatus = "required" | "not_required" | "insufficient_data";
+
+export interface AppraisalThresholdRow {
+  key: "floors" | "totalFloorArea" | "height" | "volume";
+  label: string;
+  limitText: string; // vd "≥ 7 tầng"
+  actualText: string; // vd "5 tầng" hoặc "Chưa nhập"
+  state: "met" | "not_met" | "missing";
+}
+
+export interface AppraisalBasis {
+  componentResults?: Array<{id: string; name: string; appraisalBasis: AppraisalBasis}>;
+  status: AppraisalStatus;
+  category: string;
+  categoryLabel: string;
+  categoryEvidence: string;
+  ruleMode: "always" | "threshold" | "manual_review";
+  thresholdSource: "manual_review" | "statutory" | "scale_independent" | "conservative_estimate" | "reference_general";
+  legalText: string;
+  thresholds: AppraisalThresholdRow[];
+  triggeredBy: string[];
+  missingFields: string[];
+  summary: string;
+  conclusion: string;
+  actualScale: string;
+  minFireRatingText?: string;
 }

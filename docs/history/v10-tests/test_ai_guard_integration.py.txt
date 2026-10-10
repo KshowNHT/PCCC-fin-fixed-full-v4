@@ -1,0 +1,127 @@
+"""Tích hợp: AI "xấu" (giả lập) đi qua API thật + PostgreSQL thật.
+
+Cần biến môi trường như khi chạy backend (DATABASE_URL, JWT_SECRET, PCCC_ADMIN_USERNAME, PCCC_ADMIN_PASSWORD, NODE_ENV=production).
+Chạy:  python3 tests/test_ai_guard_integration.py
+Không gọi Gemini thật: hàm run_deep_llm_appraisal được thay bằng bản giả trả đúng dữ liệu kịch bản.
+"""
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+for key in ("DATABASE_URL", "JWT_SECRET", "PCCC_ADMIN_USERNAME", "PCCC_ADMIN_PASSWORD"):
+    if not os.environ.get(key):
+        sys.exit(f"Thiếu biến môi trường {key} (xem đầu file)")
+os.environ.setdefault("NODE_ENV", "production")
+
+from fastapi.testclient import TestClient  # noqa: E402
+
+import app.main as m  # noqa: E402
+
+NEXT = {}
+
+
+async def fake_ai(project, history, documents, sessions, trigger_text=None, session_id=None):
+    return dict(NEXT)
+
+
+m.run_deep_llm_appraisal = fake_ai
+errors = []
+
+
+def check(cond, msg):
+    print(("   ok  : " if cond else "   FAIL: ") + msg)
+    if not cond:
+        errors.append(msg)
+
+
+with TestClient(m.app) as client:
+    tok = client.post("/api/auth/login-json", json={"username": os.environ["PCCC_ADMIN_USERNAME"], "password": os.environ["PCCC_ADMIN_PASSWORD"]}).json()["access_token"]
+    H = {"Authorization": f"Bearer {tok}"}
+
+    def new_session(**project):
+        sid = client.post("/api/sessions", json={}, headers=H).json()["id"]
+        if project:
+            client.put(f"/api/sessions/{sid}/project?appraise=false", json=project, headers=H)
+        return sid
+
+    def chat(sid, text):
+        r = client.post("/api/chat", json={"sessionId": sid, "messageText": text}, headers=H)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    print("### T1. AI xấu qua CHAT: bịa số tầng/diện tích/loại công trình + reply sai")
+    sid = new_session()
+    NEXT.clear()
+    NEXT.update({
+        "extractedProjectInfo": {"floors": 12, "totalFloorArea": 99999999, "type": "Karaoke", "pcccHeight": 18, "name": "Công trình X"},
+        "reply": "Công trình của bạn đã vượt ngưỡng nên bắt buộc thẩm duyệt. Bạn nên bố trí lối thoát nạn thứ hai.",
+        "warnings": ["Công trình vượt ngưỡng 7 tầng.", "Nên kiểm tra khoảng cách an toàn với nhà lân cận."],
+    })
+    res = chat(sid, "Nhà 5 tầng, tổng 500 m2, cao 18m")
+    p = res["projectInfo"]
+    check(p["floors"] == 0, "số tầng bịa (12) KHÔNG được ghi vào hồ sơ")
+    check(p["totalFloorArea"] == 0, "diện tích vô lý (99.999.999) KHÔNG được ghi")
+    check(p["type"] == "Nhà ở riêng lẻ kết hợp kinh doanh", "loại công trình KHÔNG bị AI đổi sang karaoke")
+    check(p["pcccHeight"] == 18, "số có trong lời người dùng (18 m) ĐƯỢC ghi")
+    check(p["name"] == "Công trình X", "tên được điền vì đang là 'Dự án mới'")
+    check("lối thoát nạn thứ hai" in res["reply"], "câu hữu ích của AI được giữ lại")
+    check("vượt ngưỡng nên bắt buộc" not in res["reply"], "câu 'vượt ngưỡng nên bắt buộc thẩm duyệt' bị lược bỏ")
+    check("chưa được ghi vào hồ sơ" in res["reply"], "người dùng được báo số liệu AI nào đã bị bỏ qua")
+    check(not any("vượt ngưỡng 7 tầng" in w for w in res["warnings"]), "cảnh báo AI sai bị loại")
+    check(any("khoảng cách an toàn" in w for w in res["warnings"]), "cảnh báo AI hợp lý được giữ")
+    check(any("Đã bỏ qua số tầng nổi" in w for w in res["warnings"]), "cảnh báo hệ thống nêu rõ số liệu bị bỏ qua")
+    check(res["appraisalBasis"]["status"] == "insufficient_data", "kết luận = chưa đủ thông số (không bị lái theo AI)")
+
+    print("\n### T2. AI tốt qua CHAT: số liệu có trong lời người dùng")
+    sid = new_session()
+    NEXT.clear()
+    NEXT.update({
+        "extractedProjectInfo": {"floors": 5, "totalFloorArea": 500, "pcccHeight": 18, "fireRating": "Bậc II"},
+        "reply": "Công trình không thuộc diện thẩm duyệt vì chưa đạt ngưỡng nào. Bạn nên lắp đèn EXIT.",
+    })
+    res = chat(sid, "Nhà 5 tầng, tổng 500 m2, cao 18m, bậc II")
+    p = res["projectInfo"]
+    check((p["floors"], p["totalFloorArea"], p["pcccHeight"], p["fireRating"]) == (5, 500.0, 18.0, "Bậc II"), "toàn bộ số liệu hợp lệ được ghi")
+    check(res["appraisalBasis"]["status"] == "not_required", "kết luận = không bắt buộc (5 < 7, 500 < 3.000)")
+    check(res["reply"].startswith("Công trình không thuộc diện thẩm duyệt") and "đèn EXIT" in res["reply"] and "lược bỏ" not in res["reply"],
+          "reply đúng của AI được giữ nguyên, không bị can thiệp")
+
+    print("\n### T3. Karaoke thật + AI nói sai lý do (đúng kịch bản ảnh chụp)")
+    sid = new_session()
+    NEXT.clear()
+    NEXT.update({
+        "extractedProjectInfo": {"type": "Quán karaoke", "floors": 5, "totalFloorArea": 500, "pcccHeight": 18},
+        "reply": "Công trình của bạn đã vượt ngưỡng 7 tầng nên bắt buộc thẩm duyệt. Cần bổ sung hồ sơ thoát nạn.",
+    })
+    res = chat(sid, "Tôi mở quán karaoke 5 tầng 500 m2 cao 18 m")
+    check(res["projectInfo"]["type"] == "Cơ sở kinh doanh Karaoke, Vũ trường", "loại công trình được chuẩn hoá về đúng giá trị dropdown")
+    check(res["appraisalBasis"]["status"] == "required" and res["appraisalBasis"]["triggeredBy"] == [], "bắt buộc vì công năng, KHÔNG có ngưỡng nào đạt")
+    check("vượt ngưỡng 7 tầng" not in res["reply"], "câu sai 'vượt ngưỡng 7 tầng' KHÔNG tới được người dùng")
+    check("Cần bổ sung hồ sơ thoát nạn" in res["reply"] and "bất kể quy mô" in res["reply"], "giữ câu đúng và kèm kết luận chính thức 'bất kể quy mô'")
+
+    print("\n### T4. Nút KIỂM DUYỆT (appraise=true) với AI xấu")
+    sid = new_session(type="Cơ sở kinh doanh Karaoke, Vũ trường", floors=5, totalFloorArea=500, floorArea=100, pcccHeight=18)
+    NEXT.clear()
+    NEXT.update({
+        "extractedProjectInfo": {"floors": 50, "type": "Chợ, Trung tâm thương mại", "fireRating": "Bậc I"},
+        "reply": "Công trình 50 tầng cần sprinkler. Hồ sơ cần chữ ký tư vấn.",
+    })
+    r = client.put(f"/api/sessions/{sid}/project?appraise=true", json={"name": "Hồ sơ T4"}, headers=H)
+    check(r.status_code == 200, "PUT appraise=true trả 200")
+    res = r.json()
+    p = res["projectInfo"]
+    check(p["floors"] == 5 and p["type"] == "Cơ sở kinh doanh Karaoke, Vũ trường" and p["fireRating"] != "Bậc I", "AI không thể đổi số tầng/loại công trình/bậc chịu lửa")
+    check(res["appraisalBasis"]["status"] == "required", "kết luận vẫn đúng (karaoke → bắt buộc)")
+    msgs = [x["text"] for x in res["messages"] if x["sender"] == "assistant"]
+    check(bool(msgs) and "Công trình 50 tầng cần sprinkler" not in msgs[-1] and "chữ ký tư vấn" in msgs[-1],
+          "lời trả lời lưu trong hội thoại đã được lọc câu sai '50 tầng'")
+    check(bool(msgs) and "Value error" not in msgs[-1] and "Input should" not in msgs[-1], "thông báo cho người dùng không lộ tiếng Anh thô")
+
+    print("\n### T5. Lịch sử hội thoại lưu bản đã lọc, không lưu bản AI gốc")
+    stored = client.get("/api/sessions", headers=H).json()
+    mine = next(s for s in stored if s["id"] == sid)
+    all_text = " ".join(x["text"] for x in mine["messages"])
+    check("Công trình 50 tầng cần sprinkler" not in all_text, "câu sai không còn nằm trong lịch sử hội thoại")
+
+print(f"\nTỔNG LỖI TÍCH HỢP: {len(errors)}")
+sys.exit(1 if errors else 0)

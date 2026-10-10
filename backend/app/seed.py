@@ -7,7 +7,7 @@
 """
 import logging
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.auth import hash_password
 from app.config import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
@@ -20,6 +20,8 @@ logger = logging.getLogger("pccc.seed")
 
 async def seed_initial_data() -> None:
     async with AsyncSessionLocal() as db:
+        if db.bind.dialect.name == "postgresql":
+            await db.execute(text("SELECT pg_advisory_xact_lock(72190000)"))
         user_count = (await db.execute(select(func.count()).select_from(User))).scalar_one()
         if user_count == 0:
             admin = User(
@@ -58,4 +60,13 @@ async def seed_initial_data() -> None:
                 )
             logger.info("[Seed] Đã nạp %d tài liệu pháp lý mặc định vào PostgreSQL.", len(DEFAULT_DOCUMENTS))
 
+        # Remove legacy generated summaries from existing v10 seeded documents.
+        # Preserve customer uploaded custom documents and all identities.
+        for item in DEFAULT_DOCUMENTS:
+            existing = await db.get(Document, item["id"])
+            if existing is None and item["id"] == "doc_nd347_2026":
+                db.add(Document(id=item["id"], code=item["code"], title=item["title"], type=item["type"],
+                                link=item["link"], content=item["content"], is_custom=False))
+            if existing and not existing.is_custom:
+                existing.content = item["content"]
         await db.commit()

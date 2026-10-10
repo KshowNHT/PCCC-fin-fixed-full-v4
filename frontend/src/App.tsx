@@ -4,8 +4,8 @@ import { MainArea } from "./components/MainArea";
 import { Login } from "./components/Login";
 import { BlueprintUpload } from "./components/BlueprintUpload";
 import { InspectionLogPanel } from "./components/InspectionLogPanel";
-import { ProjectInfo, DocumentItem, ChatMessage, ChecklistItem } from "./types";
-import { apiFetch, getStoredUser, verifySession, logout, AuthUser } from "./lib/api";
+import { ProjectInfo, DocumentItem, ChatMessage, ChecklistItem, AppraisalBasis } from "./types";
+import { apiFetch, getStoredUser, verifySession, logout, getToken, AuthUser } from "./lib/api";
 import { activateCodeProtection } from "./lib/codeProtection";
 import { DevToolsWarningOverlay } from "./components/DevToolsWarningOverlay";
 import { LogOut, ScanLine, History } from "lucide-react";
@@ -16,16 +16,19 @@ interface Session {
   projectInfo: ProjectInfo;
   messages: ChatMessage[];
   updatedAt: string;
+  revision: string;
+  reviewState?: "draft" | "reviewed";
   checklist?: ChecklistItem[];
   isSubjectToAppraisal?: boolean;
   appraisalReason?: string;
+  appraisalBasis?: AppraisalBasis | null;
   warnings?: string[];
 }
 
 const EMPTY_PROJECT: ProjectInfo = {
   name: "", location: "", investor: "", designer: "", stage: "", type: "",
   length: 0, width: 0, height: 0, pcccHeight: 0, floorArea: 0, totalFloorArea: 0,
-  floors: 0, basements: 0, fireRating: "Bậc III", commercialDetails: "", floorFunctions: [],
+  floors: 0, basements: 0, fireRating: "", commercialDetails: "", floorFunctions: [],
 };
 
 export default function App() {
@@ -56,7 +59,30 @@ export default function App() {
   }, [currentUser]);
 
   const [sessions, setSessions] = useState<Session[]>([]);
+  const [nextOffset, setNextOffset] = useState(50);
+  const [hasMoreSessions, setHasMoreSessions] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
+  const activeIdRef = React.useRef(activeSessionId);
+  activeIdRef.current = activeSessionId;
+  const saveQueue = React.useRef<Promise<void>>(Promise.resolve());
+  const saveCount = React.useRef(0);
+  const failedFields = React.useRef(new Set<string>());
+  const busyRef = React.useRef(false);
+  const revisions = React.useRef(new Map<string, string>());
+  const [formEpoch, setFormEpoch] = useState(0);
+  const rememberRevisions = (items: Session[]) => {
+    items.forEach(item => { if (item.revision) revisions.current.set(item.id, item.revision); });
+  };
+  const revisionHeaders = (sid: string) => {
+    const revision = revisions.current.get(sid);
+    if (!revision) throw new Error("Chưa có phiên bản hồ sơ. Tải lại hồ sơ trước khi tiếp tục.");
+    return { "If-Match": revision };
+  };
+  const [isSaving, setIsSaving] = useState(false);
+  const [hasLocalDraft, setHasLocalDraft] = useState(false);
+  const localDraft = React.useRef(false);
+  const markDraft = () => { localDraft.current = true; setHasLocalDraft(true); };
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [isPending, setIsPending] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
@@ -66,6 +92,7 @@ export default function App() {
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [isSubjectToAppraisal, setIsSubjectToAppraisal] = useState(false);
   const [appraisalReason, setAppraisalReason] = useState("");
+  const [appraisalBasis, setAppraisalBasis] = useState<AppraisalBasis | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
@@ -139,7 +166,7 @@ export default function App() {
 
   const handleCancelPending = () => {
     abortControllerRef.current?.abort();
-    setIsPending(false);
+    // Keep the operation locked until its server snapshot has been reconciled.
   };
 
 
@@ -151,7 +178,7 @@ export default function App() {
       setAuthChecked(true);
     })();
 
-    const handleUnauthorized = () => setCurrentUser(null);
+    const handleUnauthorized = () => handleLogout();
     window.addEventListener("pccc:unauthorized", handleUnauthorized);
     return () => window.removeEventListener("pccc:unauthorized", handleUnauthorized);
   }, []);
@@ -172,24 +199,51 @@ export default function App() {
 
   const fetchSessions = async () => {
     try {
-      const res = await apiFetch("/api/sessions");
+      const res = await apiFetch("/api/sessions?limit=50&offset=0");
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
-      if (data && data.length > 0) {
+      if (!Array.isArray(data)) throw new Error("Danh sách hồ sơ không hợp lệ.");
+      rememberRevisions(data);
+      setHasMoreSessions(data.length === 50);
+      setNextOffset(50);
+      if (data.length > 0) {
         setSessions(data);
         setActiveSessionId(data[0].id);
         syncActiveSessionStates(data[0]);
       } else {
         handleCreateSession();
       }
-    } catch (e) {
-      console.error("Lỗi đồng bộ danh mục phiên:", e);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setValidationError("Không tải được danh sách hồ sơ. Kiểm tra kết nối và thử lại.");
+    }
+  };
+
+  const loadOlderSessions = async () => {
+    if (loadingHistory || isPending) return;
+    setLoadingHistory(true);
+    try {
+      const res = await apiFetch(`/api/sessions?limit=50&offset=${nextOffset}`);
+      if (!res.ok) throw new Error(await parseApiError(res));
+      const data: Session[] = await res.json();
+      if (!Array.isArray(data)) throw new Error("Dữ liệu lịch sử không hợp lệ.");
+      setSessions(prev => [...prev, ...data.filter(item => !prev.some(old => old.id === item.id))]);
+      setNextOffset(value => value + 50);
+      rememberRevisions(data);
+      setHasMoreSessions(data.length === 50);
+    } catch {
+      setValidationError("Không tải được hồ sơ cũ. Vui lòng thử lại.");
+    } finally {
+      setLoadingHistory(false);
     }
   };
 
   const fetchDocuments = async () => {
     try {
       const res = await apiFetch("/api/documents");
+      if (!res.ok) throw new Error(await parseApiError(res));
       const data = await res.json();
+      if (!Array.isArray(data)) throw new Error("Danh sách tài liệu không hợp lệ.");
       setDocuments(data);
     } catch (e) {
       console.error("Lỗi tải bộ cơ sở dữ liệu pháp quy:", e);
@@ -197,139 +251,226 @@ export default function App() {
   };
 
   const handleCreateSession = async () => {
+    if (busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    busyRef.current = true;
+    setIsPending(true);
     try {
       const res = await apiFetch("/api/sessions", {
         method: "POST",
         body: JSON.stringify({ title: `Hồ sơ kiểm duyệt #${Date.now().toString().slice(-4)}` }),
       });
+      if (!res.ok) throw new Error(await parseApiError(res));
       const newSess = await res.json();
       setSessions((prev) => [newSess, ...prev]);
       setActiveSessionId(newSess.id);
-      setChecklist([]);
-      setIsSubjectToAppraisal(false);
-      setAppraisalReason("");
-      setWarnings([]);
-    } catch (e) {
-      console.error("Lỗi khởi tạo phiên chat mới:", e);
+      localDraft.current = false; setHasLocalDraft(false);
+      syncActiveSessionStates(newSess);
+      failedFields.current.clear();
+      setIsBlueprintUploadOpen(false);
+      setIsInspectionLogOpen(false);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setValidationError("Không tạo được hồ sơ. Vui lòng thử lại.");
+    } finally {
+      if (token === getToken()) { busyRef.current = false; setIsPending(false); }
     }
   };
 
   const handleDeleteSession = async (id: string) => {
+    if (busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    busyRef.current = true;
+    setIsPending(true);
     try {
-      await apiFetch(`/api/sessions/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/sessions/${id}`, { method: "DELETE", headers: revisionHeaders(id) });
+      if (!res.ok) throw new Error(await parseApiError(res));
       const nextSessions = sessions.filter((s) => s.id !== id);
       setSessions(nextSessions);
       if (activeSessionId === id && nextSessions.length > 0) {
         setActiveSessionId(nextSessions[0].id);
         syncActiveSessionStates(nextSessions[0]);
       } else if (nextSessions.length === 0) {
-        handleCreateSession();
+        busyRef.current = false;
+        await handleCreateSession();
       }
-    } catch (e) {
-      console.error("Lỗi xóa phiên:", e);
+    } catch (e: any) {
+      if (e?.name === "AbortError") return;
+      setValidationError("Không xóa được hồ sơ. Vui lòng thử lại.");
+    } finally {
+      if (token === getToken()) { busyRef.current = false; setIsPending(false); }
     }
   };
 
-  const handleSelectSession = (id: string) => {
+  const handleSelectSession = async (id: string) => {
+    if (busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    setIsBlueprintUploadOpen(false);
+    setIsInspectionLogOpen(false);
     const s = sessions.find((item) => item.id === id);
     if (s) {
       setActiveSessionId(id);
+      localDraft.current = false; setHasLocalDraft(false);
       syncActiveSessionStates(s);
+      failedFields.current.clear();
+      setValidationError("");
+      activeIdRef.current = id;
+      busyRef.current = true;
+      setIsPending(true);
+      try { await reconcileSession(id); }
+      catch (e: any) {
+        if (e?.name !== "AbortError") {
+          failedFields.current.add("__sync__");
+          setValidationError(e.message || "Không tải được hồ sơ mới nhất.");
+        }
+      } finally { if (token === getToken()) { busyRef.current = false; setIsPending(false); } }
     }
   };
 
   const syncActiveSessionStates = (sess: Session) => {
+    if (sess.revision) revisions.current.set(sess.id, sess.revision);
     setChecklist(sess.checklist || []);
     setIsSubjectToAppraisal(sess.isSubjectToAppraisal ?? false);
     setAppraisalReason(sess.appraisalReason || "");
+    setAppraisalBasis(sess.appraisalBasis ?? null);
     setWarnings(sess.warnings || []);
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!activeSessionId) return;
+    if (!activeSessionId || busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
     setIsPending(true);
+    await saveQueue.current;
+    if (operationToken !== getToken()) return;
+    if (failedFields.current.size) {
+      busyRef.current = false;
+      setIsPending(false);
+      setValidationError("Có thông số chưa lưu được. Hãy sửa và lưu lại trước khi tiếp tục.");
+      return;
+    }
     // FIX B04: tạo AbortController mới cho mỗi lượt gọi, cho phép huỷ giữa chừng.
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
     try {
-      const updatedSessions = sessions.map((s) => {
-        if (s.id === activeSessionId) {
-          const userMsg: ChatMessage = { id: "msg_opt_" + Date.now(), sender: "user", text, timestamp: new Date().toISOString() };
-          return { ...s, messages: [...s.messages, userMsg] };
-        }
-        return s;
-      });
-      setSessions(updatedSessions);
-
       const res = await apiFetch("/api/chat", {
         method: "POST",
         body: JSON.stringify({ sessionId: activeSessionId, messageText: text }),
+        headers: revisionHeaders(activeSessionId),
         signal: controller.signal,
       });
 
-      if (!res.ok) throw new Error("Lỗi tương tác với dịch vụ AI.");
+      if (!res.ok) throw new Error(await parseApiError(res));
 
       const data = await res.json();
+      if (activeIdRef.current !== activeSessionId) return;
       setSessions((prev) =>
-        prev.map((s) => (s.id === activeSessionId ? { ...s, projectInfo: data.projectInfo, messages: data.messages, updatedAt: new Date().toISOString() } : s))
+        prev.map((s) => (s.id === activeSessionId ? { ...s, projectInfo: data.projectInfo, messages: data.messages, checklist: data.checklist, isSubjectToAppraisal: data.isSubjectToAppraisal, appraisalReason: data.appraisalReason, appraisalBasis: data.appraisalBasis, warnings: data.warnings, updatedAt: new Date().toISOString() } : s))
       );
       setChecklist(data.checklist || []);
       setIsSubjectToAppraisal(data.isSubjectToAppraisal ?? false);
       setAppraisalReason(data.appraisalReason || "");
+      setAppraisalBasis(data.appraisalBasis ?? null);
       setWarnings(data.warnings || []);
     } catch (e: any) {
       // FIX B04: huỷ theo yêu cầu người dùng không phải là lỗi thật, không hiện thông báo lỗi.
-      if (e?.name !== "AbortError") console.error(e);
+      if (e?.name !== "AbortError") setValidationError(e.message || "Kết nối thất bại. Vui lòng thử lại.");
     } finally {
-      setIsPending(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller && operationToken === getToken()) {
+        try { await reconcileSession(activeSessionId); }
+        catch (e: any) {
+          if (e?.name !== "AbortError") {
+            failedFields.current.add("__sync__");
+            setValidationError("Chưa xác nhận được trạng thái hồ sơ trên máy chủ. Hãy tải lại trước khi tiếp tục.");
+          }
+        }
+        busyRef.current = false;
+        setIsPending(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
-  const handleUpdateProject = async (info: Partial<ProjectInfo>) => {
-    const activeSess = sessions.find((s) => s.id === activeSessionId);
-    if (!activeSess) return;
-
-    const previousProjectInfo = activeSess.projectInfo;
-    const newProjectInfo = { ...activeSess.projectInfo, ...info };
-    setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, projectInfo: newProjectInfo } : s)));
-    setValidationError("");
-
-    try {
-      const res = await apiFetch(`/api/sessions/${activeSessionId}/project?appraise=false`, {
-        method: "PUT",
-        body: JSON.stringify(newProjectInfo),
-      });
-      if (res.ok) {
+  const handleUpdateProject = (info: Partial<ProjectInfo>): Promise<void> => {
+    markDraft();
+    const sid = activeIdRef.current;
+    const authToken = getToken();
+    if (!sid || busyRef.current) return Promise.resolve();
+    saveCount.current += 1;
+    setIsSaving(true);
+    const next = saveQueue.current.then(async () => {
+      try {
+        if (authToken !== getToken()) return;
+        const res = await apiFetch(`/api/sessions/${sid}/project?appraise=false`, {
+          method: "PUT", body: JSON.stringify(info), headers: revisionHeaders(sid),
+        });
+        if (!res.ok) throw new Error(await parseApiError(res));
         const data = await res.json();
-        setSessions((prev) =>
-          prev.map((s) =>
-            s.id === activeSessionId
-              ? { ...s, projectInfo: data.projectInfo, checklist: data.checklist, isSubjectToAppraisal: data.isSubjectToAppraisal, appraisalReason: data.appraisalReason, warnings: data.warnings, updatedAt: new Date().toISOString() }
-              : s
-          )
-        );
-        setChecklist(data.checklist || []);
-        setIsSubjectToAppraisal(data.isSubjectToAppraisal ?? false);
-        setAppraisalReason(data.appraisalReason || "");
-        setWarnings(data.warnings || []);
-      } else {
-        // FIX B03: trước đây lỗi 422 bị nuốt im lặng, ô nhập vẫn hiển thị giá
-        // trị không hợp lệ trong khi backend đã từ chối lưu — rollback UI về
-        // giá trị đã lưu gần nhất trên server, kèm thông báo lý do rõ ràng.
-        const message = await parseApiError(res);
-        setValidationError(message);
-        setSessions((prev) => prev.map((s) => (s.id === activeSessionId ? { ...s, projectInfo: previousProjectInfo } : s)));
+        if (data.revision) revisions.current.set(sid, data.revision);
+        if (saveCount.current === 1) setSessions(prev => prev.map(s => s.id === sid ? data : s));
+        Object.keys(info).forEach(key => failedFields.current.delete(key));
+        if (activeIdRef.current === sid && saveCount.current === 1) {
+          syncActiveSessionStates(data);
+          if (!failedFields.current.size) setValidationError("");
+        }
+      } catch (e: any) {
+        if (e?.name !== "AbortError") {
+          Object.keys(info).forEach(key => failedFields.current.add(key));
+          setValidationError(e.message || "Chưa lưu được thông số. Kiểm tra kết nối và nhập lại.");
+        }
+      } finally {
+        saveCount.current -= 1;
+        setIsSaving(saveCount.current > 0);
       }
-    } catch (e) {
-      console.error("Lỗi đồng bộ tham số kiến trúc lên máy chủ:", e);
+    });
+    saveQueue.current = next;
+    return next;
+  };
+
+  const reconcileSession = async (sid: string) => {
+    const res = await apiFetch(`/api/sessions/${sid}`);
+    if (!res.ok) throw new Error(await parseApiError(res));
+    const data = await res.json();
+    setSessions(prev => prev.map(s => s.id === sid ? data : s));
+    if (activeIdRef.current === sid) syncActiveSessionStates(data);
+  };
+
+  const handleReloadActiveSession = async () => {
+    const sid = activeIdRef.current;
+    if (!sid || busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    try {
+      await reconcileSession(sid);
+      failedFields.current.clear();
+      setValidationError("");
+      localDraft.current = false; setHasLocalDraft(false);
+      setFormEpoch(value => value + 1);
+    } catch (e: any) {
+      if (e?.name !== "AbortError") setValidationError(e.message || "Không tải lại được hồ sơ.");
+    } finally {
+      if (token === getToken()) { busyRef.current = false; setIsPending(false); }
     }
   };
 
   const handleTriggerAppraisal = async () => {
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    if (busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    await saveQueue.current;
+    if (operationToken !== getToken()) return;
+    if (failedFields.current.size) {
+      busyRef.current = false;
+      setIsPending(false);
+      setValidationError("Có thông số chưa lưu được. Hãy sửa và lưu lại trước khi tiếp tục.");
+      return;
+    }
     const activeSess = sessions.find((s) => s.id === activeSessionId);
-    if (!activeSess) return;
+    if (!activeSess) { busyRef.current = false; setIsPending(false); return; }
 
     setIsPending(true);
     setValidationError("");
@@ -339,37 +480,52 @@ export default function App() {
     try {
       const res = await apiFetch(`/api/sessions/${activeSessionId}/project?appraise=true`, {
         method: "PUT",
-        body: JSON.stringify(activeSess.projectInfo),
+        body: JSON.stringify({}),
+        headers: revisionHeaders(activeSessionId),
         signal: controller.signal,
       });
       if (res.ok) {
         const data = await res.json();
+        if (data.reviewState === "reviewed") { localDraft.current = false; setHasLocalDraft(false); }
+        if (activeIdRef.current !== activeSessionId) return;
         setSessions((prev) =>
           prev.map((s) =>
             s.id === activeSessionId
-              ? { ...s, projectInfo: data.projectInfo, messages: data.messages, checklist: data.checklist, isSubjectToAppraisal: data.isSubjectToAppraisal, appraisalReason: data.appraisalReason, warnings: data.warnings, updatedAt: new Date().toISOString() }
+              ? { ...s, projectInfo: data.projectInfo, messages: data.messages, checklist: data.checklist, isSubjectToAppraisal: data.isSubjectToAppraisal, appraisalReason: data.appraisalReason, appraisalBasis: data.appraisalBasis, warnings: data.warnings, updatedAt: new Date().toISOString() }
               : s
           )
         );
         setChecklist(data.checklist || []);
         setIsSubjectToAppraisal(data.isSubjectToAppraisal ?? false);
         setAppraisalReason(data.appraisalReason || "");
+        setAppraisalBasis(data.appraisalBasis ?? null);
         setWarnings(data.warnings || []);
       } else {
         const message = await parseApiError(res);
         setValidationError(message);
       }
     } catch (e: any) {
-      if (e?.name !== "AbortError") console.error("Lỗi kích hoạt thẩm định từ máy chủ:", e);
+      if (e?.name !== "AbortError") setValidationError(e.message || "Chưa hoàn thành rà soát. Vui lòng thử lại.");
     } finally {
-      setIsPending(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller && operationToken === getToken()) {
+        try { await reconcileSession(activeSessionId); }
+        catch (e: any) {
+          if (e?.name !== "AbortError") {
+            failedFields.current.add("__sync__");
+            setValidationError("Chưa xác nhận được trạng thái hồ sơ trên máy chủ. Hãy tải lại trước khi tiếp tục.");
+          }
+        }
+        busyRef.current = false;
+        setIsPending(false);
+        abortControllerRef.current = null;
+      }
     }
   };
 
   // OCR: áp dụng thông số bóc tách được từ bản vẽ vào form dự án đang mở (Ngày 15-17 kế hoạch: Autofill)
   const handleApplyOcrExtraction = async (extracted: Partial<ProjectInfo>) => {
     await handleUpdateProject(extracted);
+    if (failedFields.current.size) throw new Error("Chưa áp dụng được dữ liệu OCR. Hãy kiểm tra thông số.");
     setIsBlueprintUploadOpen(false);
   };
 
@@ -394,19 +550,21 @@ export default function App() {
 
   const handleDeleteDocument = async (id: string) => {
     try {
-      await apiFetch(`/api/documents/${id}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/documents/${id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await parseApiError(res));
       await fetchDocuments();
     } catch (e) {
-      console.error("Lỗi xóa tài liệu:", e);
+      setValidationError("Không xóa được tài liệu. Vui lòng thử lại.");
     }
   };
 
   const handleResetDocuments = async () => {
     try {
-      await apiFetch("/api/documents/reset", { method: "POST" });
+      const res = await apiFetch("/api/documents/reset", { method: "POST" });
+      if (!res.ok) throw new Error(await parseApiError(res));
       await fetchDocuments();
     } catch (e) {
-      console.error("Lỗi khôi phục tài liệu:", e);
+      setValidationError("Không khôi phục được tài liệu. Vui lòng thử lại.");
     }
   };
 
@@ -422,70 +580,134 @@ export default function App() {
   };
 
   const handleExportReport = async () => {
+    if (busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    await saveQueue.current;
+    if (operationToken !== getToken()) return;
+    if (failedFields.current.size || localDraft.current) {
+      busyRef.current = false;
+      setIsPending(false);
+      setValidationError("Thông số chưa kiểm duyệt hoặc chưa lưu được. Nhập xong và bấm Kiểm duyệt hồ sơ trước khi xuất.");
+      return;
+    }
     const activeSess = sessions.find((s) => s.id === activeSessionId);
-    if (!activeSess || checklist.length === 0) return;
+    if (!activeSess || checklist.length === 0) { busyRef.current = false; setIsPending(false); return; }
     setIsExporting(true);
     try {
       const res = await apiFetch("/api/report/export", {
         method: "POST",
-        body: JSON.stringify({ sessionId: activeSessionId, projectInfo: activeSess.projectInfo, checklist, conclusions: { isAppraisalRequired: isSubjectToAppraisal, reason: appraisalReason, warnings } }),
+        body: JSON.stringify({ sessionId: activeSessionId, expectedRevision: revisionHeaders(activeSessionId)["If-Match"] }),
       });
-      if (!res.ok) throw new Error("Lỗi quá trình tải file báo cáo.");
+      if (!res.ok) throw new Error(await parseApiError(res));
       const blob = await res.blob();
       downloadBlob(blob, `Tu_van_PCCC_${activeSess.projectInfo.name.replace(/\s+/g, "_")}.docx`);
     } catch (e: any) {
       console.error(e);
       alert("Không thể tải file báo cáo thẩm định: " + e.message);
     } finally {
-      setIsExporting(false);
+      if (operationToken === getToken()) {
+        busyRef.current = false;
+        setIsPending(false);
+        setIsExporting(false);
+      }
     }
   };
 
   const handleExportReportPdf = async () => {
+    if (busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    await saveQueue.current;
+    if (operationToken !== getToken()) return;
+    if (failedFields.current.size || localDraft.current) {
+      busyRef.current = false;
+      setIsPending(false);
+      setValidationError("Thông số chưa kiểm duyệt hoặc chưa lưu được. Nhập xong và bấm Kiểm duyệt hồ sơ trước khi xuất.");
+      return;
+    }
     const activeSess = sessions.find((s) => s.id === activeSessionId);
-    if (!activeSess || checklist.length === 0) return;
+    if (!activeSess || checklist.length === 0) { busyRef.current = false; setIsPending(false); return; }
     setIsExportingPdf(true);
     try {
       const res = await apiFetch("/api/report/export-pdf", {
         method: "POST",
-        body: JSON.stringify({ sessionId: activeSessionId, projectInfo: activeSess.projectInfo, checklist, conclusions: { isAppraisalRequired: isSubjectToAppraisal, reason: appraisalReason, warnings } }),
+        body: JSON.stringify({ sessionId: activeSessionId, expectedRevision: revisionHeaders(activeSessionId)["If-Match"] }),
       });
-      if (!res.ok) throw new Error("Lỗi quá trình tải file báo cáo PDF.");
+      if (!res.ok) throw new Error(await parseApiError(res));
       const blob = await res.blob();
       downloadBlob(blob, `Tu_van_PCCC_${activeSess.projectInfo.name.replace(/\s+/g, "_")}.pdf`);
     } catch (e: any) {
       console.error(e);
       alert("Không thể tải file báo cáo PDF: " + e.message);
     } finally {
-      setIsExportingPdf(false);
+      if (operationToken === getToken()) {
+        busyRef.current = false;
+        setIsPending(false);
+        setIsExportingPdf(false);
+      }
     }
   };
 
   // Mới (Ngày 22-25 kế hoạch): xuất báo cáo JSON, bên cạnh PDF/Word đã có.
   const handleExportReportJson = async () => {
+    if (busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    await saveQueue.current;
+    if (operationToken !== getToken()) return;
+    if (failedFields.current.size || localDraft.current) {
+      busyRef.current = false;
+      setIsPending(false);
+      setValidationError("Thông số chưa kiểm duyệt hoặc chưa lưu được. Nhập xong và bấm Kiểm duyệt hồ sơ trước khi xuất.");
+      return;
+    }
     const activeSess = sessions.find((s) => s.id === activeSessionId);
-    if (!activeSess || checklist.length === 0) return;
+    if (!activeSess || checklist.length === 0) { busyRef.current = false; setIsPending(false); return; }
     setIsExportingJson(true);
     try {
       const res = await apiFetch("/api/report/export-json", {
         method: "POST",
-        body: JSON.stringify({ sessionId: activeSessionId, projectInfo: activeSess.projectInfo, checklist, conclusions: { isAppraisalRequired: isSubjectToAppraisal, reason: appraisalReason, warnings } }),
+        body: JSON.stringify({ sessionId: activeSessionId, expectedRevision: revisionHeaders(activeSessionId)["If-Match"] }),
       });
-      if (!res.ok) throw new Error("Lỗi quá trình tải file báo cáo JSON.");
+      if (!res.ok) throw new Error(await parseApiError(res));
       const blob = await res.blob();
       downloadBlob(blob, `Tu_van_PCCC_${activeSess.projectInfo.name.replace(/\s+/g, "_")}.json`);
     } catch (e: any) {
       console.error(e);
       alert("Không thể tải file báo cáo JSON: " + e.message);
     } finally {
-      setIsExportingJson(false);
+      if (operationToken === getToken()) {
+        busyRef.current = false;
+        setIsPending(false);
+        setIsExportingJson(false);
+      }
     }
   };
 
   const handleLogout = () => {
+    abortControllerRef.current?.abort();
     logout();
+    busyRef.current = false;
+    failedFields.current.clear();
+    revisions.current.clear();
+    localDraft.current = false; setHasLocalDraft(false);
+    setIsExporting(false);
+    setIsExportingPdf(false);
+    setIsExportingJson(false);
+    setIsPending(false);
+    setIsBlueprintUploadOpen(false);
+    setIsInspectionLogOpen(false);
     setCurrentUser(null);
+    setDocuments([]);
+    setChecklist([]);
+    setWarnings([]);
+    setAppraisalBasis(null);
     setSessions([]);
+    activeIdRef.current = "";
     setActiveSessionId("");
   };
 
@@ -505,6 +727,7 @@ export default function App() {
       {/* Thanh trên cùng: thông tin người dùng + tính năng OCR / Nhật ký kiểm tra + đăng xuất */}
       <div className="flex items-center justify-end gap-2 px-4 py-1.5 bg-white border-b border-slate-200 text-sm shrink-0 z-40">
         <button
+          disabled={isPending || isSaving || !activeSessionId}
           onClick={() => setIsBlueprintUploadOpen(true)}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-slate-600 hover:bg-slate-100 transition-colors"
           title="Tải bản vẽ để AI tự động đọc và điền thông số (OCR)"
@@ -520,6 +743,9 @@ export default function App() {
           <History className="w-4 h-4" />
           <span className="hidden sm:inline">Nhật ký kiểm tra</span>
         </button>
+        {isSaving && <span role="status" className="text-amber-700">Đang lưu thông số…</span>}
+        <button disabled={isPending || isSaving || !activeSessionId} onClick={handleReloadActiveSession}
+          title="Đọc lại dữ liệu máy chủ, bỏ các chỉnh sửa chưa lưu" className="px-2 py-1 text-slate-600">Tải lại hồ sơ</button>
         <span className="mx-1 h-4 w-px bg-slate-200" />
         <span className="text-slate-500">
           {currentUser.fullName || currentUser.username}
@@ -542,8 +768,10 @@ export default function App() {
 
       <div className="flex flex-1 overflow-hidden relative">
         <Sidebar
+          key={`${activeSessionId}:${formEpoch}`}
           project={activeSession?.projectInfo || EMPTY_PROJECT}
           onUpdateProject={handleUpdateProject}
+          onDraftChange={markDraft}
           onTriggerAppraisal={handleTriggerAppraisal}
           isPending={isPending}
           documents={documents}
@@ -555,6 +783,8 @@ export default function App() {
           onSelectSession={handleSelectSession}
           onCreateSession={handleCreateSession}
           onDeleteSession={handleDeleteSession}
+          onLoadOlderSessions={hasMoreSessions ? loadOlderSessions : undefined}
+          loadingHistory={loadingHistory}
           isSidebarOpen={isSidebarOpen}
           setIsSidebarOpen={setIsSidebarOpen}
         />
@@ -566,14 +796,16 @@ export default function App() {
         <MainArea
           sessionTitle={activeSession?.projectInfo.name || activeSession?.title || "Hồ sơ Thẩm định"}
           messages={activeSession?.messages || []}
+          reviewState={hasLocalDraft ? "draft" : activeSession?.reviewState || "draft"}
           onSendMessage={handleSendMessage}
           onTriggerAppraisal={handleTriggerAppraisal}
           isPending={isPending}
           onCancelPending={handleCancelPending}
-          checklist={checklist}
+          checklist={hasLocalDraft ? [] : checklist}
           isSubjectToAppraisal={isSubjectToAppraisal}
-          appraisalReason={appraisalReason}
-          warnings={warnings}
+          appraisalReason={hasLocalDraft ? "Chưa kiểm duyệt các thông số đang sửa." : appraisalReason}
+          appraisalBasis={hasLocalDraft ? null : appraisalBasis}
+          warnings={hasLocalDraft ? [] : warnings}
           projectInfo={activeSession?.projectInfo || EMPTY_PROJECT}
           onExportReport={handleExportReport}
           isExporting={isExporting}
@@ -586,6 +818,7 @@ export default function App() {
 
       {isBlueprintUploadOpen && (
         <BlueprintUpload
+          key={activeSessionId}
           sessionId={activeSessionId}
           onClose={() => setIsBlueprintUploadOpen(false)}
           onApply={handleApplyOcrExtraction}
@@ -593,7 +826,7 @@ export default function App() {
       )}
 
       {isInspectionLogOpen && (
-        <InspectionLogPanel sessionId={activeSessionId} onClose={() => setIsInspectionLogOpen(false)} />
+        <InspectionLogPanel key={activeSessionId} sessionId={activeSessionId} onClose={() => setIsInspectionLogOpen(false)} />
       )}
     </div>
   );

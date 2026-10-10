@@ -234,205 +234,44 @@ def _draw_table_row(
     return y + max_height
 
 
-def generate_compliance_report_pdf(
-    project: Dict[str, Any], checklist: List[Dict[str, Any]], conclusions: Dict[str, Any],
-) -> bytes:
-    """Port of POST /api/report/export-pdf."""
-    font_reg, font_bold = _ensure_fonts()
+def generate_compliance_report_pdf(project: Dict[str, Any], checklist: List[Dict[str, Any]], conclusions: Dict[str, Any]) -> bytes:
+    """Paginated report: long Vietnamese input, table rows and reasons must wrap."""
+    from html import escape
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib import colors
+    font, bold = _ensure_fonts()
     buf = io.BytesIO()
-    c = canvas.Canvas(buf, pagesize=A4)
-    c.setTitle(f"Báo cáo Thẩm định PCCC - {project.get('name', '')}")
-    c.setAuthor("Chuyên Gia Compliance AI PCCC")
-
-    c.setFont(font_bold, 10)
-    c.setFillColor("#0f172a")
-    c.drawCentredString(PAGE_W / 2, _top_y(45 + 10), "CỘNG HÒA XÃ HỘI CHỦ NGHĨA VIỆT NAM")
-    c.setFont(font_bold, 9)
-    c.setFillColor("#334155")
-    c.drawCentredString(PAGE_W / 2, _top_y(58 + 9), "Độc lập – Tự do – Hạnh phúc")
-    c.setStrokeColor("#64748b")
-    c.setLineWidth(0.75)
-    c.line(220, _top_y(72), 375, _top_y(72))
-
-    c.setFont(font_bold, 14)
-    c.setFillColor("#b91c1c")
-    c.drawCentredString(PAGE_W / 2, _top_y(95 + 14), "BẢNG TƯ VẤN AN TOÀN PHÒNG CHÁY CHỮA CHÁY")
-
-    c.setFont(font_bold, 10)
-    c.setFillColor("#334155")
-    title2 = f"{str(project.get('name', '')).upper()} – {project.get('floors', 0)} TẦNG – {project.get('totalFloorArea', 0)}m² SÀN"
-    c.drawCentredString(PAGE_W / 2, _top_y(115 + 10), title2)
-
-    today = date.today()
-    creation_date = f"Ngày lập: ngày {today.day} tháng {today.month} năm {today.year}"
-    c.setFont(font_reg, 8.5)
-    c.setFillColor("#64748b")
-    c.drawCentredString(PAGE_W / 2, _top_y(130 + 8.5), creation_date)
-
-    current_y = 155.0
-
-    c.setFont(font_bold, 11)
-    c.setFillColor("#1e3a8a")
-    c.drawString(50, _top_y(current_y + 11), "I. THÔNG TIN CÔNG TRÌNH ĐẦU VÀO")
-    current_y += 10 + 11
-
-    # FIX B15 (Bao_Cao_QA_Lan_3.md — Cao): bản PDF trước đây chỉ có 8 dòng,
-    # THIẾU hẳn "Kích thước hình học", "Diện tích xây dựng tầng 1", "Tổng
-    # diện tích sàn", "Chi tiết phần kinh doanh" so với bản DOCX (13 dòng)
-    # — hai định dạng xuất ra cho CÙNG 1 hồ sơ lại không khớp nhau, và bản
-    # PDF (thường dùng để trình ký) lại thiếu đúng số liệu diện tích sàn mà
-    # Mục II của chính nó dùng làm căn cứ kết luận. Bổ sung đủ 13 dòng,
-    # đồng bộ nội dung với docx_report.py.
-    # FIX B21 (cùng nguyên tắc với docx_report.py): không tự bịa dữ liệu cụ
-    # thể vào các trường trống — luôn fallback "Chưa cập nhật" trung thực.
-    _length, _width = project.get("length") or 0, project.get("width") or 0
-    _dimensions_text = f"{_length}m (dài) × {_width}m (rộng)" if (_length or _width) else "Chưa cập nhật"
-    _floor_area_val = project.get("floorArea") or 0
-    _total_floor_area_val = project.get("totalFloorArea") or 0
-    _floors_val = project.get("floors") or 0
-
-    fields = [
-        ("Tên công trình", project.get("name", "")),
-        ("Chủ đầu tư", project.get("investor") or "Chưa cập nhật"),
-        ("Địa điểm xây dựng", project.get("location") or "Chưa cập nhật"),
-        ("Đơn vị thiết kế / Giai đoạn", f"{project.get('designer') or 'Chưa cập nhật'} / {project.get('stage') or 'Thiết kế cơ sở'}"),
-        ("Loại công trình & Công năng", project.get("type", "")),
-        ("Kích thước hình học", _dimensions_text),
-        ("Diện tích xây dựng tầng 1", f"{_floor_area_val} m²" if _floor_area_val else "Chưa cập nhật"),
-        (
-            "Tổng diện tích sàn",
-            f"~{_total_floor_area_val} m² ({_floors_val} tầng nổi × {_floor_area_val} m²)" if _total_floor_area_val else "Chưa cập nhật",
-        ),
-        ("Quy mô số tầng", f"{project.get('floors', 0)} tầng nổi, {project.get('basements', 0)} tầng hầm"),
-        ("Chiều cao PCCC", f"{project.get('pcccHeight') or project.get('height', 0)} m (Chiều cao thực tế: {project.get('height', 0)} m)"),
-        ("Bậc chịu lửa dự kiến", project.get("fireRating") or "Chưa chọn"),
-        ("Chi tiết phần kinh doanh", project.get("commercialDetails") or "Chưa cập nhật"),
-    ]
-
-    for label, val in fields:
-        c.setFont(font_bold, 9)
-        l_h = _height_of_string(c, label, font_bold, 9, 151)
-        v_h = _height_of_string(c, str(val), font_reg, 9, 334)
-        cell_h = max(l_h, v_h) + 10
-
-        if current_y + cell_h > 780:
-            c.showPage()
-            current_y = 55.0
-
-        c.setFillColor("#f1f5f9")
-        c.rect(50, _top_y(current_y + cell_h), 155, cell_h, fill=1, stroke=0)
-        c.setFillColor("#ffffff")
-        c.rect(205, _top_y(current_y + cell_h), 340, cell_h, fill=1, stroke=0)
-        c.setStrokeColor("#cbd5e1")
-        c.setLineWidth(0.5)
-        c.rect(50, _top_y(current_y + cell_h), 495, cell_h, fill=0, stroke=1)
-
-        c.setFillColor("#334155")
-        c.setFont(font_bold, 8.5)
-        c.drawString(56, _top_y(current_y + 5 + 8.5), label)
-        c.setFillColor("#0f172a")
-        c.setFont(font_reg, 8.5)
-        c.drawString(211, _top_y(current_y + 5 + 8.5), str(val))
-
-        current_y += cell_h
-
-    current_y += 20
-
-    if current_y + 120 > 780:
-        c.showPage()
-        current_y = 55.0
-
-    c.setFont(font_bold, 11)
-    c.setFillColor("#1e3a8a")
-    c.drawString(50, _top_y(current_y + 11), "II. KẾT LUẬN VỀ THẨM DUYỆT THIẾT KẾ PCCC")
-    current_y += 8 + 11
-
-    law_text = (
-        "Căn cứ pháp lý chính: Bộ luật PCCC, Nghị định số 105/2025/NĐ-CP ngày 15/5/2025 - Phụ lục III "
-        "(Danh mục dự án, công trình thuộc diện thẩm định thiết kế về phòng cháy và chữa cháy)."
-    )
-    current_y = _draw_text_block(c, law_text, 50, current_y, font_reg, 9.5, "#1e293b", 495) + 12
-
-    is_no_appraisal = not conclusions.get("isAppraisalRequired")
-    appraisal_status = (
-        "✓ CÔNG TRÌNH KHÔNG THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BỞI CƠ QUAN CÔNG AN"
-        if is_no_appraisal
-        else "✗ CÔNG TRÌNH THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BẮT BUỘC BỞI CƠ QUAN CÔNG AN"
-    )
-    c.setFillColor("#ecfdf5" if is_no_appraisal else "#fef2f2")
-    c.rect(50, _top_y(current_y + 30), 495, 30, fill=1, stroke=0)
-    c.setStrokeColor("#10b981" if is_no_appraisal else "#ef4444")
-    c.setLineWidth(0.75)
-    c.rect(50, _top_y(current_y + 30), 495, 30, fill=0, stroke=1)
-    c.setFont(font_bold, 9)
-    c.setFillColor("#065f46" if is_no_appraisal else "#991b1b")
-    c.drawString(60, _top_y(current_y + 10 + 9), appraisal_status)
-    current_y += 18 + 12
-
-    reason_text = f"Giải trình lý do cụ thể: {conclusions.get('reason', '')}"
-    current_y = _draw_text_block(c, reason_text, 50, current_y, font_reg, 9.5, "#1e293b", 495) + 12
-
-    warnings = conclusions.get("warnings") or []
-    if warnings:
-        c.setFont(font_bold, 9.5)
-        c.setFillColor("#b91c1c")
-        c.drawString(50, _top_y(current_y + 9.5), "Cảnh báo / Lưu ý bất thường trong hồ sơ:")
-        current_y += 5 + 9.5
-        for warn in warnings:
-            current_y = _draw_text_block(c, f"• {warn}", 50, current_y, font_reg, 9, "#991b1b", 495) + 3
-        current_y += 10
-
-    current_y += 15
-
-    if current_y + 100 > 780:
-        c.showPage()
-        current_y = 55.0
-
-    c.setFont(font_bold, 11)
-    c.setFillColor("#1e3a8a")
-    c.drawString(50, _top_y(current_y + 11), "III. CHECKLIST TỔNG HỢP KIỂM TRA RÀ SOÁT CHI TIẾT")
-    current_y += 10 + 11
-
-    col_widths = [30, 95, 150, 155, 65]
-    col_headers = ["STT", "HẠNG MỤC", "YÊU CẦU QUY CHUẨN", "KẾT LUẬN CHI TIẾT", "ĐÁNH GIÁ"]
-    col_aligns = ["center", "left", "left", "left", "center"]
-
-    current_y = _draw_table_row(c, current_y, col_widths, col_headers, font_reg, font_bold, col_aligns, True)
-
+    style = ParagraphStyle("body", fontName=font, fontSize=9, leading=13, wordWrap="CJK", spaceAfter=6)
+    heading = ParagraphStyle("heading", parent=style, fontName=bold, fontSize=12, leading=17, textColor=colors.HexColor("#1f4e79"), spaceBefore=10)
+    title = ParagraphStyle("title", parent=heading, fontSize=15, leading=20, alignment=1)
+    def para(value, selected=style):
+        return Paragraph(escape(str(value or "Chưa cập nhật")).replace("\n", "<br/>"), selected)
+    story = [para("BÁO CÁO SÀNG LỌC HỒ SƠ PCCC", title), para(project.get("name"), title),
+             para("Kết quả sơ bộ cần kỹ sư xác nhận; không thay thế văn bản thẩm định hoặc nghiệm thu."),
+             para("I. THÔNG TIN CÔNG TRÌNH", heading)]
+    labels = {"name":"Tên công trình", "location":"Địa điểm", "investor":"Chủ đầu tư", "designer":"Đơn vị thiết kế", "stage":"Giai đoạn", "type":"Công năng khai báo", "floors":"Số tầng nổi", "basements":"Số tầng hầm", "pcccHeight":"Chiều cao PCCC (m)", "floorArea":"Diện tích tầng (m²)", "totalFloorArea":"Tổng diện tích sàn (m²)", "fireRating":"Bậc chịu lửa khai báo", "commercialDetails":"Chi tiết công năng"}
+    rows = [[para(label), para(project.get(key))] for key, label in labels.items()]
+    table = LongTable(rows, colWidths=[145, 365], splitInRow=1)
+    table.setStyle(TableStyle([("GRID", (0,0),(-1,-1),0.4,colors.lightgrey),("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(0,0),(0,-1),colors.HexColor("#f1f5f9"))]))
+    if project.get("components"):
+        story.append(para("HẠNG MỤC ĐỘC LẬP — KHÔNG GỘP QUY MÔ", heading))
+        for c in project["components"]:
+            story.append(para(f"{c['name']} — {c.get('type') or 'Chưa rõ công năng'}; {c.get('floors') or '?'} tầng; cao {c.get('height') or '?'} m; tổng sàn {c.get('totalFloorArea') or '?'} m²; khối tích {c.get('volume') or '?'} m³; hạng {c.get('hazardClass') or '?'}; {c.get('fireRating') or '?'}. Nguồn: {c.get('sourceText') or 'Nhập tay'}"))
+    story += [table, para("II. KẾT QUẢ SÀNG LỌC QUY MÔ", heading), para(conclusions.get("reason")), para(conclusions.get("basisText"))]
+    for warning in conclusions.get("warnings") or []:
+        story.append(para("Lưu ý: " + str(warning)))
+    story.append(para("III. HẠNG MỤC CẦN KIỂM TRA BẰNG HỒ SƠ", heading))
+    rows = [[para(v) for v in ("STT", "Hạng mục", "Nhận xét / căn cứ", "Trạng thái")]]
     for item in checklist:
-        item_texts = [
-            str(item.get("stt", "")),
-            f"{item.get('criteria', '')}\n({item.get('reference', '')})",
-            item.get("requirement", ""),
-            item.get("note", ""),
-            item.get("result", ""),
-        ]
-        current_y = _draw_table_row(c, current_y, col_widths, item_texts, font_reg, font_bold, col_aligns, False)
-
-    current_y += 20
-
-    if current_y + 120 > 780:
-        c.showPage()
-        current_y = 55.0
-
-    c.setFont(font_bold, 11)
-    c.setFillColor("#1e3a8a")
-    c.drawString(50, _top_y(current_y + 11), "IV. DANH MỤC CĂN CỨ VÀ KÝ XÁC NHẬN TƯ VẤN")
-    current_y += 8 + 11
-
-    citations = (
-        "Các văn bản đối chiếu đã áp dụng: Nghị định số 105/2025/NĐ-CP; QCVN 06:2022/BXD Sửa đổi 1:2023; "
-        "QCVN 10:2025/BCA; TCVN 13456:2022; TCVN 7435-1:2004; TCVN 7568-14:2025."
-    )
-    current_y = _draw_text_block(c, citations, 50, current_y, font_reg, 8.5, "#475569", 495) + 20
-
-    c.setFont(font_bold, 9.5)
-    c.setFillColor("#0f172a")
-    c.drawCentredString(330 + 215 / 2, _top_y(current_y + 9.5), "ĐƠN VỊ TƯ VẤN THẨM ĐỊNH PCCC AI")
-    c.setFont(font_reg, 8.5)
-    c.setFillColor("#64748b")
-    c.drawCentredString(330 + 215 / 2, _top_y(current_y + 3 + 8.5 + 12), "(Ký và ghi rõ họ tên, đóng dấu sản phẩm)")
-
-    c.showPage()
-    c.save()
+        rows.append([para(item.get("stt")), para(item.get("criteria")),
+            para(str(item.get("note", "")) + "\n" + str(item.get("reference", ""))), para(item.get("result"))])
+    table = LongTable(rows, colWidths=[28, 120, 272, 90], repeatRows=1, splitInRow=1)
+    table.setStyle(TableStyle([("GRID",(0,0),(-1,-1),0.4,colors.lightgrey),("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(0,0),(-1,0),colors.HexColor("#e2e8f0")),("LEFTPADDING",(0,0),(-1,-1),5),("RIGHTPADDING",(0,0),(-1,-1),5)]))
+    story += [table, Spacer(1,14), para("IV. XÁC NHẬN CỦA NGƯỜI RÀ SOÁT", heading),
+              para("Kỹ sư cần kiểm tra toàn văn, hiệu lực, điều kiện áp dụng và bằng chứng thực tế trước khi ký. Báo cáo do phần mềm tạo không tự xác nhận tuân thủ."), Spacer(1,25), para("Họ tên / chức danh / ngày xác nhận: ............................................")]
+    def footer(c, document):
+        c.setFont(font,8)
+        c.drawRightString(PAGE_W-42,24,f"Trang {document.page}")
+    SimpleDocTemplate(buf,pagesize=A4,leftMargin=42,rightMargin=42,topMargin=38,bottomMargin=40,title="Báo cáo sàng lọc PCCC").build(story,onFirstPage=footer,onLaterPages=footer)
     return buf.getvalue()

@@ -44,7 +44,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-/lib/
+lib/
 lib64/
 parts/
 sdist/
@@ -132,3 +132,7 @@ desktop.ini
 # -------------------------
 .cache/
 .parcel-cache/
+
+# Sinh tự động bởi scripts/run_all_tests.sh
+frontend/tests/fixtures.json
+frontend/tests/.ui_test_out.cjs

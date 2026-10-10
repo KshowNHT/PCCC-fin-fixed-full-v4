@@ -8,6 +8,7 @@ interface InspectionLogEntry {
   triggerSource: string;
   isSubjectToAppraisal: boolean;
   appraisalReason: string;
+  appraisalStatus?: 'required' | 'not_required' | 'insufficient_data';
   compliantCount: number;
   nonCompliantCount: number;
   createdAt: string;
@@ -32,22 +33,30 @@ const TRIGGER_LABELS: Record<string, string> = {
 export function InspectionLogPanel({ sessionId, onClose }: InspectionLogPanelProps) {
   const [logs, setLogs] = useState<InspectionLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
   const [scope, setScope] = useState<'session' | 'all'>('session');
 
   useEffect(() => {
+    const controller = new AbortController();
     (async () => {
       setIsLoading(true);
+      setError('');
+      setLogs([]);
       try {
         const url = scope === 'session' && sessionId ? `/api/sessions/${sessionId}/inspection-logs` : '/api/inspection-logs';
-        const res = await apiFetch(url);
+        const res = await apiFetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error('Không tải được nhật ký. Vui lòng thử lại.');
         const data = await res.json();
+        if (controller.signal.aborted) return;
+        if (!Array.isArray(data)) throw new Error('Dữ liệu nhật ký không hợp lệ.');
         setLogs(data);
-      } catch (e) {
-        console.error('Lỗi tải nhật ký kiểm tra:', e);
+      } catch (e: any) {
+        if (!controller.signal.aborted) setError(e.message || 'Không tải được nhật ký.');
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     })();
+    return () => controller.abort();
   }, [sessionId, scope]);
 
   const formatDate = (iso: string) => {
@@ -68,6 +77,7 @@ export function InspectionLogPanel({ sessionId, onClose }: InspectionLogPanelPro
           </button>
         </div>
 
+        {error && <p role="alert" className="px-5 py-3 text-red-700">{error}</p>}
         <div className="flex gap-2 px-5 pt-3 shrink-0">
           <button
             onClick={() => setScope('session')}
@@ -109,15 +119,15 @@ export function InspectionLogPanel({ sessionId, onClose }: InspectionLogPanelPro
                     </td>
                     <td className="py-2.5 pr-2 text-slate-600">{TRIGGER_LABELS[log.triggerSource] || log.triggerSource}</td>
                     <td className="py-2.5 pr-2">
-                      {log.isSubjectToAppraisal ? (
+                      {log.appraisalStatus === 'required' ? (
                         <span className="inline-flex items-center gap-1 text-red-600 text-xs font-medium">
-                          <XCircle className="w-3.5 h-3.5" /> Bắt buộc thẩm duyệt
+                          <XCircle className="w-3.5 h-3.5" /> Thuộc diện thẩm định
                         </span>
-                      ) : (
+                      ) : log.appraisalStatus === 'not_required' ? (
                         <span className="inline-flex items-center gap-1 text-green-600 text-xs font-medium">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Không bắt buộc
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Dưới ngưỡng danh mục
                         </span>
-                      )}
+                      ) : <span className="text-amber-700 text-xs">Cần rà soát / chưa đủ căn cứ</span>}
                     </td>
                     <td className="py-2.5 text-right whitespace-nowrap">
                       <span className="text-green-600 font-medium">{log.compliantCount}</span>

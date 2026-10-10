@@ -15,7 +15,7 @@ logger = logging.getLogger("pccc.doc_extract")
 
 
 def extract_txt(path: str) -> str:
-    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+    with open(path, "r", encoding="utf-8-sig", errors="strict") as f:
         return f.read()
 
 
@@ -29,16 +29,10 @@ def extract_pdf(path: str, original_filename: str) -> str:
         text = "\n".join((page.extract_text() or "") for page in reader.pages)
         if text.strip():
             return text
-        return (
-            f"Tài liệu PDF: {original_filename}. Chưa thể trích xuất văn bản trực tuyến, "
-            "tuy nhiên file đã được tải lên hệ thống."
-        )
-    except Exception as err:  # noqa: BLE001
-        logger.error("Lỗi parse PDF: %s", err)
-        return (
-            f"Tài liệu PDF: {original_filename}. Lỗi trích xuất văn bản tự động, "
-            "tuy nhiên file đã được lưu trực tuyến."
-        )
+        raise ValueError("PDF không có lớp văn bản. Cần OCR trước khi nạp thư viện.")
+    except Exception:
+        logger.exception("Không trích xuất được PDF")
+        raise
 
 
 def sanitize_text(text: str) -> str:

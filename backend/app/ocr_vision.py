@@ -18,6 +18,8 @@ model="gpt-4o", response_format={"type": "json_object"})` — phần rasterize
 PDF và parse kết quả giữ nguyên.
 """
 import base64
+import io
+import asyncio
 import logging
 from pathlib import Path
 from typing import Any, Dict, List
@@ -31,7 +33,7 @@ logger = logging.getLogger("pccc.ocr_vision")
 
 _VISION_SYSTEM_PROMPT = """Bạn là kỹ sư PCCC chuyên đọc bản vẽ kiến trúc / mặt bằng / khung tên bản vẽ xây dựng Việt Nam.
 
-Nhiệm vụ: nhìn (các) ảnh bản vẽ được cung cấp (mặt bằng, mặt cắt, khung tên, ghi chú kỹ thuật) và trích xuất chính xác các thông số kỹ thuật của công trình. CHỈ điền giá trị khi bạn thực sự đọc thấy trên bản vẽ hoặc suy luận chắc chắn từ số liệu hiển thị (ví dụ đếm số tầng qua mặt cắt đứng, đo tỷ lệ để ước tính kích thước từ thước tỷ lệ nếu có). Nếu không đọc được hoặc không chắc chắn, để trống (null) — KHÔNG bịa số liệu.
+Nhiệm vụ: nhìn (các) ảnh bản vẽ được cung cấp (mặt bằng, mặt cắt, khung tên, ghi chú kỹ thuật) và trích xuất chính xác các thông số kỹ thuật của công trình. CHỈ điền giá trị khi bạn thực sự đọc thấy trên bản vẽ với giá trị và đơn vị được ghi rõ; không ước tính kích thước, khối tích, hạng nguy hiểm cháy hoặc bậc chịu lửa. Nếu không đọc được hoặc không chắc chắn, để trống (null) — KHÔNG bịa số liệu.
 
 Trả về JSON đúng theo schema, các trường:
 - name: Tên công trình (đọc từ khung tên bản vẽ)
@@ -50,14 +52,23 @@ Trả về JSON đúng theo schema, các trường:
 - commercialDetails: Mô tả công năng kinh doanh nếu bản vẽ có ghi chú (vd: cửa hàng tầng 1, gara ô tô...)
 - floorFunctions: Mảng công năng từng tầng theo thứ tự tầng 1 -> tầng cao nhất, nếu bản vẽ có chú thích công năng từng tầng
 
+BẮT BUỘC mọi tài liệu trả TẤT CẢ các nhà trong components, kể cả một nhà cũng là danh sách một phần tử, mỗi nhà là một phần tử có id riêng, name, type, height, pcccHeight, floorArea, totalFloorArea, floors, volume (khối tích m³), hazardClass (A/B/C/D/E), fireRating, industrialSubtype (other chỉ khi ghi rõ sản xuất công nghiệp khác, special chỉ khi ghi rõ loại chuyên ngành), sourcePages (trang nguồn) và sourceText (dòng số liệu đọc được). Thông số chưa đọc được dùng 0 hoặc chuỗi rỗng, không điền từ nhà khác. Dòng “Nhà có quy mô lớn nhất”, “Tổng cộng” là dòng tổng hợp, tuyệt đối không tạo hạng mục. KHÔNG gộp các nhà thành nhà hỗn hợp, không cộng diện tích các nhà để áp ngưỡng một nhà. Không sao chép hạng C của một kho cho nhà xưởng hay văn phòng. Các trường kỹ thuật cấp dự án để null; chỉ metadata tên dự án/chủ đầu tư/địa điểm ở cấp dự án. Không suy ra totalFloorArea từ diện tích xây dựng hoặc pcccHeight từ chiều cao tổng thể.
 Chỉ trả JSON, không thêm giải thích, không markdown code fence."""
 
 
-def _pdf_to_images(pdf_path: str, max_pages: int = 4) -> List[bytes]:
+class OCRInputError(ValueError):
+    pass
+
+
+def _pdf_to_images(pdf_path: str, max_pages: int = 24) -> List[bytes]:
     """Rasterize các trang đầu của PDF bản vẽ thành ảnh PNG bytes (dùng poppler qua pdf2image)."""
     from pdf2image import convert_from_path
 
-    pages = convert_from_path(pdf_path, dpi=150, first_page=1, last_page=max_pages)
+    from pypdf import PdfReader
+    count = len(PdfReader(pdf_path).pages)
+    if count > max_pages:
+        raise OCRInputError(f"PDF có {count} trang; giới hạn OCR là {max_pages}. Tách hồ sơ thành các phần, không bỏ qua trang.")
+    pages = convert_from_path(pdf_path, dpi=150, first_page=1, last_page=max_pages, size=2400, thread_count=1, timeout=30)
     images: List[bytes] = []
     for page in pages:
         import io
@@ -73,14 +84,21 @@ def _load_images_from_upload(file_path: str, content_type: str) -> List[bytes]:
     if suffix == ".pdf" or content_type == "application/pdf":
         return _pdf_to_images(file_path)
     # Ảnh trực tiếp (.png/.jpg/.jpeg/.webp)
-    return [Path(file_path).read_bytes()]
+    from PIL import Image
+    with Image.open(file_path) as image:
+        image = image.convert("RGB")
+        image.thumbnail((2400, 2400))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return [buf.getvalue()]
 
 
 async def _call_vision_model(images: List[bytes]) -> Dict[str, Any]:
     """Gọi Gemini multimodal vision. Xem docstring module để biết cách thay
     bằng GPT-4o Vision nếu cần bám sát 100% brand model trong hợp đồng gốc."""
     parts: List[Dict[str, Any]] = [{"text": _VISION_SYSTEM_PROMPT}]
-    for img_bytes in images:
+    for page_number, img_bytes in enumerate(images, 1):
+        parts.append({"text": f"Trang nguồn {page_number}"})
         parts.append(
             {
                 "inline_data": {
@@ -119,7 +137,7 @@ async def extract_project_data_from_drawing(file_path: str, content_type: str = 
     để frontend autofill trực tiếp vào form, đúng yêu cầu Ngày 15-17:
     'Cập nhật UI Form để hiển thị dữ liệu do AI tự động bóc tách (Autofill)'.
     """
-    images = _load_images_from_upload(file_path, content_type)
+    images = await asyncio.to_thread(_load_images_from_upload, file_path, content_type)
     if not images:
         raise ValueError("Không đọc được trang nào từ file bản vẽ đã upload.")
 
@@ -129,5 +147,20 @@ async def extract_project_data_from_drawing(file_path: str, content_type: str = 
         logger.error("Lỗi trích xuất OCR bản vẽ: %s", err)
         raise
 
+    # Fail closed on an incomplete schema, before returning a preview or writing data.
+    from pydantic import ValidationError
+    try:
+        extracted = ExtractedProjectInfo.model_validate(extracted).model_dump(exclude_none=True)
+    except ValidationError as exc:
+        raise OCRInputError("OCR chưa tách được danh sách hạng mục hợp lệ. Không áp dụng hồ sơ thiếu; hãy thử lại hoặc nhập tay từng nhà.") from exc
+    if not extracted["components"]:
+        raise OCRInputError("Không đọc được hạng mục độc lập nào. Không tự gộp công trình hoặc suy đoán số liệu.")
+    for building in extracted["components"]:
+        if not building["sourcePages"] or not building["sourceText"].strip() or any(page > len(images) for page in building["sourcePages"]):
+            raise OCRInputError("Hạng mục OCR thiếu trang nguồn hoặc dòng số liệu để đối chiếu. Không áp dụng dữ liệu chưa rõ nguồn.")
+
     # Loại bỏ key rỗng/None để không ghi đè dữ liệu đã có bằng giá trị rỗng
-    return {k: v for k, v in extracted.items() if v not in (None, "", [])}
+    result = {k: v for k, v in extracted.items() if v not in (None, "", [])}
+    result["_ocrCoverage"] = {"pagesRead": len(images), "completePageCoverage": True,
+                              "notice": "Đã gửi tất cả trang trong giới hạn; người dùng phải đối chiếu số lượng hạng mục và số liệu trước khi kiểm duyệt."}
+    return result

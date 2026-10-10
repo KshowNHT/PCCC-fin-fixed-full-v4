@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -12,6 +12,8 @@ def _validate_password_strength(v: str) -> str:
     brute-force/dò offline nếu hash rò rỉ. Nâng lên MIN_PASSWORD_LENGTH
     (mặc định 10) + bắt buộc có cả chữ và số để chặn các mật khẩu kiểu
     "aaaaaaaaaa" hay "1111111111" vẫn thoả điều kiện độ dài."""
+    if len(v.encode("utf-8")) > 72:
+        raise ValueError("Mật khẩu không được vượt quá 72 byte UTF-8.")
     if len(v) < MIN_PASSWORD_LENGTH:
         raise ValueError(f"Mật khẩu phải có ít nhất {MIN_PASSWORD_LENGTH} ký tự.")
     if not re.search(r"[A-Za-z]", v) or not re.search(r"[0-9]", v):
@@ -24,7 +26,7 @@ class RegisterRequest(BaseModel):
     password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
     full_name: str = Field(default="", max_length=255)
     email: Optional[str] = Field(default=None, max_length=255)
-    role: str = "staff"  # chỉ admin mới được set "admin" cho người khác (kiểm tra ở route)
+    role: Literal["admin", "staff"] = "staff"  # chỉ admin mới được set "admin" cho người khác (kiểm tra ở route)
 
     _validate_password = field_validator("password")(_validate_password_strength)
 
@@ -40,7 +42,7 @@ class ChangePasswordRequest(BaseModel):
     admin mặc định sau lần đăng nhập đầu. Bắt buộc phải nhập đúng mật khẩu
     cũ (chống kẻ tấn công đã cướp phiên JWT tạm thời tự ý đổi mật khẩu để
     chiếm tài khoản vĩnh viễn)."""
-    old_password: str
+    old_password: str = Field(max_length=128)
     new_password: str = Field(min_length=MIN_PASSWORD_LENGTH, max_length=128)
 
     _validate_new_password = field_validator("new_password")(_validate_password_strength)
@@ -52,6 +54,13 @@ class ChatRequest(BaseModel):
     khổng lồ vừa tốn chi phí gọi Gemini API vừa có thể gây lỗi/DoS."""
     sessionId: str = Field(min_length=1, max_length=128)
     messageText: str = Field(min_length=1, max_length=MAX_CHAT_MESSAGE_LENGTH)
+
+    @field_validator("messageText")
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError("Tin nhắn không được để trống.")
+        return value
 
 
 class TokenResponse(BaseModel):

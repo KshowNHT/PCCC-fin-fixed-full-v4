@@ -17,6 +17,8 @@ import {
   Search
 } from "lucide-react";
 import { ProjectInfo, DocumentItem } from "../types";
+import { BuildingEditor } from "./BuildingEditor";
+import { apiFetch } from "../lib/api";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 const apiUrl = (path: string) =>
@@ -25,6 +27,7 @@ const apiUrl = (path: string) =>
 interface SidebarProps {
   project: ProjectInfo;
   onUpdateProject: (info: Partial<ProjectInfo>) => void;
+  onDraftChange?: () => void;
   documents: DocumentItem[];
   onUploadDocument: (files: File[], code: string, title: string, type: string) => Promise<DocumentItem[]>;
   onDeleteDocument: (id: string) => void;
@@ -34,6 +37,8 @@ interface SidebarProps {
   onSelectSession: (id: string) => void;
   onCreateSession: () => void;
   onDeleteSession: (id: string) => void;
+  onLoadOlderSessions?: () => void;
+  loadingHistory?: boolean;
   onTriggerAppraisal: () => void;
   isPending: boolean;
   isSidebarOpen: boolean;
@@ -43,6 +48,7 @@ interface SidebarProps {
 export function Sidebar({
   project,
   onUpdateProject,
+  onDraftChange,
   documents,
   onUploadDocument,
   onDeleteDocument,
@@ -52,6 +58,8 @@ export function Sidebar({
   onSelectSession,
   onCreateSession,
   onDeleteSession,
+  onLoadOlderSessions,
+  loadingHistory,
   onTriggerAppraisal,
   isPending,
   isSidebarOpen,
@@ -64,6 +72,21 @@ export function Sidebar({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
+  const downloadDocument = async (doc: DocumentItem) => {
+    try {
+      const res = await apiFetch(`/api/documents/${doc.id}/download?format=pdf`);
+      if (!res.ok) throw new Error("Không tải được tài liệu. Kiểm tra quyền truy cập và thử lại.");
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `Tai_lieu_${doc.id}.pdf`;
+      link.click();
+      window.URL.revokeObjectURL(url);
+    } catch (e: any) {
+      setUploadError(e.message || "Không tải được tài liệu.");
+    }
+  };
   const [docSearchQuery, setDocSearchQuery] = useState("");
   const [uploadProgress, setUploadProgress] = useState<{ [filename: string]: number }>({});
 
@@ -225,7 +248,7 @@ export function Sidebar({
           </div>
           <div>
             <h1 className="font-display font-black text-[18px] leading-tight tracking-tight text-black flex items-center gap-1">
-              AI Expert PCCC <span className="text-brand-orange font-mono text-[10px] font-bold px-1 rounded bg-brand-orange/15 border border-brand-orange/20">v1.0</span>
+              AI Expert PCCC <span className="text-brand-orange font-mono text-[10px] font-bold px-1 rounded bg-brand-orange/15 border border-brand-orange/20">v11.3</span>
             </h1>
             <p className="text-[14.5px] text-black font-black font-mono">Hệ thống thẩm định chuyên gia</p>
           </div>
@@ -243,7 +266,7 @@ export function Sidebar({
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-6">
         {/* SECTION 1: PROJECT SPECS */}
-        <div className="space-y-3">
+        <fieldset disabled={isPending} onInputCapture={onDraftChange} onChangeCapture={onDraftChange} className="space-y-3">
           <div className="flex items-center gap-2 border-b-2 border-slate-350 pb-1.5">
             <Compass className="w-4.5 h-4.5 text-brand-orange shrink-0" />
             <h2 className="text-[16px] font-black uppercase tracking-wider text-black font-display">Thông số Công trình</h2>
@@ -290,6 +313,7 @@ export function Sidebar({
               </div>
             </div>
 
+            <div hidden={!!project.components?.length} className="space-y-2.5">
             <div>
               <label className="block text-[10px] uppercase font-extrabold text-black mb-1">Loại & Công năng công trình</label>
               <select
@@ -298,9 +322,12 @@ export function Sidebar({
                 onChange={(e) => onUpdateProject({ type: e.target.value })}
                 className="w-full px-2.5 py-1.5 bg-white hover:bg-slate-50 focus:bg-white outline-none rounded text-black font-bold border border-slate-300 focus:border-brand-orange transition-all text-sm font-sans"
               >
+                {!["Nhà ở riêng lẻ kết hợp kinh doanh", "Nhà ở riêng lẻ", "Nhà hỗn hợp", "Cơ sở kinh doanh Karaoke, Vũ trường", "Gara ô tô", "Văn phòng, khách sạn công cộng", "Nhà kho xếp giá đỡ kệ cao", "Chợ, Trung tâm thương mại", "Nhà máy, nhà xưởng sản xuất", "Cơ sở giáo dục, trường học", "Rạp hát, hội trường, trung tâm tổ chức sự kiện"].includes(project.type) && <option value={project.type}>{project.type || "Chưa xác định"}</option>}
+                <option value="Nhà hỗn hợp">Nhà hỗn hợp</option>
                 <option value="Nhà ở riêng lẻ kết hợp kinh doanh">Nhà ở kết hợp kinh doanh</option>
                 <option value="Nhà ở riêng lẻ">Nhà ở riêng lẻ dân dụng</option>
                 <option value="Cơ sở kinh doanh Karaoke, Vũ trường">Cơ sở kinh doanh dịch vụ Karaoke</option>
+                <option value="Nhà để xe ô tô dạng kín">Nhà để xe ô tô dạng kín</option>
                 <option value="Gara ô tô">Gara ô-tô chuyên dụng</option>
                 <option value="Văn phòng, khách sạn công cộng">Văn phòng, công sở, khách sạn</option>
                 <option value="Nhà kho xếp giá đỡ kệ cao">Nhà kho chứa hàng hóa</option>
@@ -336,7 +363,7 @@ export function Sidebar({
                     let nextList = [...localFloorFunctions];
                     if (nextList.length < num) {
                       while (nextList.length < num) {
-                        nextList.push("Nhà ở riêng lẻ / Dân dụng");
+                        nextList.push("");
                       }
                     } else if (nextList.length > num) {
                       nextList.splice(num);
@@ -356,7 +383,7 @@ export function Sidebar({
                     let nextList = [...localFloorFunctions];
                     if (nextList.length < num) {
                       while (nextList.length < num) {
-                        nextList.push("Nhà ở riêng lẻ / Dân dụng");
+                        nextList.push("");
                       }
                     } else if (nextList.length > num) {
                       nextList.splice(num);
@@ -393,8 +420,8 @@ export function Sidebar({
 
                     if (nextFns.length < num) {
                       while (nextFns.length < num) {
-                        nextFns.push("Bãi đỗ xe hầm");
-                        nextHeights.push(3.3);
+                        nextFns.push("");
+                        nextHeights.push(0);
                         nextAreas.push(Number(localFloorArea) || 400);
                         nextFootprints.push(Number(localFloorArea) || 400);
                       }
@@ -427,8 +454,8 @@ export function Sidebar({
 
                     if (nextFns.length < num) {
                       while (nextFns.length < num) {
-                        nextFns.push("Bãi đỗ xe hầm");
-                        nextHeights.push(3.3);
+                        nextFns.push("");
+                        nextHeights.push(0);
                         nextAreas.push(Number(localFloorArea) || 400);
                         nextFootprints.push(Number(localFloorArea) || 400);
                       }
@@ -486,8 +513,8 @@ export function Sidebar({
                 <div className="space-y-3 max-h-56 overflow-y-auto custom-scrollbar pr-1">
                   {Array.from({ length: Number(localBasements) }).map((_, idx) => {
                     const bNum = idx + 1;
-                    const curFn = localBasementFunctions[idx] || "Bãi đỗ xe hầm";
-                    const curHeight = localBasementHeights[idx] ?? 3.3;
+                    const curFn = localBasementFunctions[idx] || "";
+                    const curHeight = localBasementHeights[idx] ?? 0;
                     const curArea = localBasementAreas[idx] ?? (Number(localFloorArea) || 400);
                     const curFootprint = localBasementFootprints[idx] ?? (Number(localFloorArea) || 400);
                     return (
@@ -507,6 +534,7 @@ export function Sidebar({
                             }}
                             className="w-full px-1.5 py-1 bg-white outline-none rounded text-black font-bold border border-slate-300 focus:border-brand-orange text-[14.5px] font-sans"
                           >
+                            <option value="">Chưa nhập công năng hầm</option>
                             <option value="Bãi đỗ xe hầm">Bãi đỗ xe dưới hầm</option>
                             <option value="Gian kĩ thuật hầm">Gian kỹ thuật / Máy phát</option>
                             <option value="Thương mại hầm">Thương mại / Dịch vụ</option>
@@ -586,7 +614,7 @@ export function Sidebar({
                 <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-1">
                   {Array.from({ length: Number(localFloors) }).map((_, idx) => {
                     const floorNum = idx + 1;
-                    const currentVal = localFloorFunctions[idx] || "Nhà ở riêng lẻ / Dân dụng";
+                    const currentVal = localFloorFunctions[idx] || "";
                     return (
                       <div key={idx} className="flex items-center gap-1.5 justify-between">
                         <span className="text-[14px] font-black text-black w-18 shrink-0">Tầng {floorNum}:</span>
@@ -600,6 +628,7 @@ export function Sidebar({
                           }}
                           className="flex-1 px-1.5 py-1 bg-white outline-none rounded text-black font-black border border-slate-300 focus:border-brand-orange text-[15px] font-sans"
                         >
+                          <option value="">Chưa nhập công năng tầng</option>
                           <option value="Nhà ở riêng lẻ / Dân dụng">Nhà ở dân dụng</option>
                           <option value="Kinh doanh thương mại / Dịch vụ nhẹ">Cửa hàng / Kinh doanh</option>
                           <option value="Dịch vụ giải trí Karaoke, Vũ trường">Cơ sở Karaoke / Bar</option>
@@ -687,8 +716,10 @@ export function Sidebar({
                 />
               </div>
             </div>
+            </div>
           </div>
-        </div>
+          <BuildingEditor project={project} onUpdate={onUpdateProject} />
+        </fieldset>
 
         {/* Nút Thẩm định và Kiểm duyệt hồ sơ */}
         <div className="pt-2 space-y-2">
@@ -817,7 +848,8 @@ export function Sidebar({
                         <Eye className="w-3" />
                       </button>
                       <a
-                        href={apiUrl(`/api/documents/${doc.id}/download?format=pdf`)}
+                        href="#"
+                        onClick={(e) => { e.preventDefault(); void downloadDocument(doc); }}
                         download
                         title="Tải xuống tài liệu PDF"
                         className="text-slate-500 hover:text-emerald-600 p-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer flex items-center justify-center"
@@ -959,6 +991,10 @@ export function Sidebar({
             })()}
           </div>
 
+          {onLoadOlderSessions && <button type="button" disabled={loadingHistory || isPending} onClick={onLoadOlderSessions}
+            className="w-full py-2 text-sm border rounded-lg disabled:opacity-50">
+            {loadingHistory ? "Đang tải..." : "Tải thêm hồ sơ cũ"}
+          </button>}
           {/* Pagination limit and buttons controller */}
           {sessions.length > 0 && (
             <div className="flex items-center justify-between pt-2.5 border-t border-slate-200 text-[14px] font-sans text-black font-bold">
@@ -1087,7 +1123,8 @@ export function Sidebar({
                   Sao chép nội dung
                 </button>
                 <a 
-                  href={apiUrl(`/api/documents/${previewDoc.id}/download?format=pdf`)}
+                  href="#"
+                  onClick={(e) => { e.preventDefault(); void downloadDocument(previewDoc); }}
                   download
                   className="flex items-center gap-1.5 px-4 py-2 bg-brand-orange hover:bg-brand-orange/95 text-white font-black tracking-wide uppercase text-[11px] rounded-xl transition-all cursor-pointer shadow-md shadow-brand-orange/15"
                 >

@@ -1,0 +1,77 @@
+"""Hồi quy API: PDF theo 3 trạng thái, giới hạn tài khoản (race condition), tính ổn định.
+Dùng: API=http://127.0.0.1:8000 ADMIN_PASS=... PGPASSWORD=... python3 tests/api_regression.py"""
+import concurrent.futures as cf
+import json
+import os
+import subprocess
+import tempfile
+import urllib.error
+import urllib.request
+
+API = os.environ.get("API", "http://127.0.0.1:9910")
+PASS = os.environ.get("ADMIN_PASS", "E2eAdminPass123!")
+PGDB = os.environ.get("PGDB", "pccc_e2e")
+
+
+def call(m, p, b=None, t=None, raw=False):
+    r = urllib.request.Request(API + p, method=m, data=json.dumps(b).encode() if b is not None else None)
+    r.add_header("Content-Type", "application/json")
+    if t:
+        r.add_header("Authorization", "Bearer " + t)
+    try:
+        d = urllib.request.urlopen(r, timeout=60).read()
+        return 200, d if raw else json.loads(d)
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+
+
+T = call("POST", "/api/auth/login-json", {"username": "admin", "password": PASS})[1]["access_token"]
+errs = 0
+
+
+def ok(c, m):
+    global errs
+    print(("   ok  : " if c else "   FAIL: ") + m)
+    errs += (not c)
+
+
+def pdf_flat(proj):
+    _, sess = call("POST", "/api/sessions", {}, T)
+    call("PUT", f"/api/sessions/{sess['id']}/project?appraise=false", proj, T)
+    s, data = call("POST", "/api/report/export-pdf", {"sessionId": sess["id"]}, T, raw=True)
+    with tempfile.NamedTemporaryFile(suffix=".pdf") as f:
+        f.write(data)
+        f.flush()
+        out = subprocess.run(["pdftotext", "-layout", f.name, "-"], capture_output=True, text=True).stdout
+    return s, " ".join(out.split())
+
+
+MIXED = "Nhà ở riêng lẻ kết hợp kinh doanh"
+print("### PDF theo 3 trạng thái")
+s, t = pdf_flat({"type": "Cơ sở kinh doanh Karaoke, Vũ trường", "floors": 5, "totalFloorArea": 500, "floorArea": 100, "pcccHeight": 18})
+ok(s == 200 and "BẮT BUỘC BỞI CƠ QUAN CÔNG AN" in t, "PDF karaoke: tiêu đề BẮT BUỘC")
+ok("bất kể quy mô" in t and "Căn cứ áp dụng" in t and "ĐẠT HOẶC VƯỢT" not in t, "PDF karaoke: lý do + căn cứ đúng, không 'ĐẠT HOẶC VƯỢT'")
+s, t = pdf_flat({"type": MIXED, "floors": 5, "floorArea": 100, "pcccHeight": 18})
+ok("CHƯA ĐỦ THÔNG SỐ" in t and "KHÔNG THUỘC DIỆN" not in t, "PDF thiếu diện tích: 'CHƯA ĐỦ THÔNG SỐ'")
+s, t = pdf_flat({"type": MIXED, "floors": 5, "totalFloorArea": 500, "floorArea": 100, "pcccHeight": 18})
+ok("KHÔNG THUỘC DIỆN THẨM DUYỆT" in t and "ĐẠT HOẶC VƯỢT" not in t, "PDF 5 tầng/500 m²: 'KHÔNG THUỘC DIỆN', không 'ĐẠT HOẶC VƯỢT'")
+s, t = pdf_flat({"type": MIXED, "floors": 8, "totalFloorArea": 900, "floorArea": 112, "pcccHeight": 26})
+ok("BẮT BUỘC BỞI CƠ QUAN CÔNG AN" in t and "số tầng nổi 8 tầng ≥ 7 tầng" in t, "PDF 8 tầng/900 m²: nêu đúng căn cứ 8 ≥ 7")
+
+print("### Giới hạn tài khoản (15 request đồng thời)")
+mk = lambda i: call("POST", "/api/auth/users", {"username": f"race{i}", "password": "RaceTest123", "full_name": f"R{i}", "role": "staff"}, T)[0]
+with cf.ThreadPoolExecutor(15) as ex:
+    codes = list(ex.map(mk, range(15)))
+cnt = subprocess.run(["psql", "-h", "127.0.0.1", "-U", "pccc_app", "-d", PGDB, "-t", "-A", "-c", "SELECT count(*) FROM users"],
+                     capture_output=True, text=True, env=dict(os.environ)).stdout.strip()
+ok(int(cnt) <= 10, f"tổng tài khoản {cnt} <= 10 (201:{codes.count(201)}, 403:{codes.count(403)})")
+
+print("### Ổn định")
+_, sess = call("POST", "/api/sessions", {}, T)
+runs = [call("PUT", f"/api/sessions/{sess['id']}/project?appraise=true",
+             {"type": "Cơ sở kinh doanh Karaoke, Vũ trường", "floors": 5, "totalFloorArea": 500, "floorArea": 100, "pcccHeight": 18}, T)[1] for _ in range(3)]
+ok(all(len(r["checklist"]) == 17 for r in runs), "3 lần thẩm định: đủ 17 mục")
+ok(all([c["result"] for c in r["checklist"]] == [c["result"] for c in runs[0]["checklist"]] for r in runs), "kết quả giống hệt qua 3 lần")
+ok(all(r["appraisalReason"] == r["appraisalBasis"]["summary"] for r in runs), "lý do luôn bằng căn cứ")
+print("TỔNG LỖI HỒI QUY:", errs)
+raise SystemExit(1 if errs else 0)

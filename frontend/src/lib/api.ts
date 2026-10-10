@@ -24,7 +24,8 @@ export function getStoredUser(): AuthUser | null {
   const raw = localStorage.getItem(USER_KEY);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as AuthUser;
+    const user = JSON.parse(raw);
+    return user && typeof user.id === "string" && ["admin", "staff"].includes(user.role) ? user as AuthUser : null;
   } catch {
     return null;
   }
@@ -49,11 +50,27 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
     headers.set("Content-Type", "application/json");
   }
 
-  const res = await fetch(apiUrl(path), { ...options, headers });
+  const timeout = AbortSignal.timeout(100_000);
+  const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+  const res = await fetch(apiUrl(path), { ...options, headers, signal });
+
+  // A response from the previous login must never populate the next user's screen
+  // or clear their token, including a late 401 from an expired old request.
+  if (token !== getToken()) throw new DOMException("Phiên đăng nhập đã thay đổi.", "AbortError");
 
   if (res.status === 401) {
     clearAuth();
     window.dispatchEvent(new CustomEvent("pccc:unauthorized"));
+  }
+
+  // Token may change while the response body is still streaming.
+  for (const method of ["json", "blob", "text", "arrayBuffer"] as const) {
+    const original = res[method].bind(res);
+    (res as any)[method] = async () => {
+      const body = await original();
+      if (token !== getToken()) throw new DOMException("Phiên đăng nhập đã thay đổi.", "AbortError");
+      return body;
+    };
   }
 
   return res;
@@ -64,6 +81,7 @@ export async function login(username: string, password: string): Promise<AuthUse
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
+    signal: AbortSignal.timeout(15_000),
   });
 
   if (!res.ok) {

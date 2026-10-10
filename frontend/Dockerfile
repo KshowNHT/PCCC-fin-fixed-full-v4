@@ -4,7 +4,7 @@ FROM node:20-slim AS build
 WORKDIR /app
 
 COPY package*.json ./
-RUN npm install
+RUN npm ci --no-audit --no-fund
 
 COPY . .
 
@@ -39,10 +39,11 @@ ENV VITE_ENABLE_CODE_PROTECTION=${VITE_ENABLE_CODE_PROTECTION}
 RUN npm run build
 
 # Serve the production build using Nginx.
-FROM nginx:1.27-alpine
+FROM nginx:stable-alpine
 
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY pccc-proxy.conf /etc/nginx/pccc-proxy.conf
 
 EXPOSE 80
 

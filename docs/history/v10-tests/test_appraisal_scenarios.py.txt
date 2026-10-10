@@ -1,0 +1,314 @@
+"""Kiểm thử kịch bản thẩm duyệt PCCC — chạy được bằng `python tests/test_appraisal_scenarios.py`
+(không cần pytest, không cần DB/mạng) hoặc `pytest tests/`.
+
+TRIẾT LÝ: kỳ vọng của từng kịch bản được SUY LUẬN TAY từ quy tắc nghiệp vụ,
+không sao chép từ kết quả chạy của code. Ngoài ra 13 "bất biến" (G1..G13) được
+kiểm tra chéo trên MỌI kịch bản và trên 3.000 hồ sơ ngẫu nhiên (fuzz) — đây là
+lớp bắt các lỗi kiểu "kết luận đúng nhưng lý do sai" mà test từng ca dễ bỏ sót.
+"""
+import copy
+import json
+import os
+import random
+import re
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from app.appraisal_basis import (  # noqa: E402
+    CATEGORY_INFO, effective_height, to_number,
+)
+from app.rules_engine import AREA_MISMATCH_WARNING, evaluate_appraisal  # noqa: E402
+
+MIXED = "Nhà ở riêng lẻ kết hợp kinh doanh"
+KARAOKE = "Cơ sở kinh doanh Karaoke, Vũ trường"
+
+
+def P(ptype=MIXED, floors=0, area=0, floor_area=0, pccc=0, height=0, rating="Bậc III", details="", ff=None):
+    return {"type": ptype, "floors": floors, "totalFloorArea": area, "floorArea": floor_area,
+            "pcccHeight": pccc, "height": height, "fireRating": rating, "commercialDetails": details,
+            "floorFunctions": ff or []}
+
+
+# (id, mô tả, project, kỳ vọng)
+# kỳ vọng: status, category, triggered(set), items{stt: result}, extra checks
+CASES = [
+    ("C01", "Nhà ở KD 5 tầng/500m²/18m, Bậc III -> dưới mọi ngưỡng", P(floors=5, area=500, floor_area=100, pccc=18),
+     dict(status="not_required", category="mixed_residential", triggered=set(),
+          items={1: "Không bắt buộc", 2: "Không đạt", 9: "Không bắt buộc", 10: "Khuyến nghị mạnh", 11: "Không đạt", 12: "Không bắt buộc"})),
+    ("C02", "6 tầng/2.999m²: sát ngưỡng nhưng chưa đạt", P(floors=6, area=2999, pccc=20, rating="Bậc II"),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={1: "Không bắt buộc", 2: "Đạt", 11: "Không đạt"})),
+    ("C03", "7 tầng/400m²: đạt ngưỡng số tầng (biên)", P(floors=7, area=400, pccc=25, rating="Bậc II"),
+     dict(status="required", category="mixed_residential", triggered={"floors"},
+          items={1: "Không đạt", 9: "Không đạt", 10: "Không bắt buộc", 12: "Không bắt buộc"})),
+    ("C04", "3 tầng/3.000m²: đạt ngưỡng diện tích (biên)", P(floors=3, area=3000, pccc=10),
+     dict(status="required", category="mixed_residential", triggered={"totalFloorArea"}, items={1: "Không đạt", 2: "Đạt", 9: "Không bắt buộc", 11: "Khuyến nghị"})),
+    ("C05", "7 tầng/3.000m²: đạt cả hai", P(floors=7, area=3000, pccc=24, rating="Bậc II"),
+     dict(status="required", category="mixed_residential", triggered={"floors", "totalFloorArea"}, items={1: "Không đạt"})),
+    ("C06", "Nhà nhỏ 2 tầng/100m²/8m", P(floors=2, area=100, floor_area=50, pccc=8),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={2: "Đạt", 11: "Khuyến nghị", 12: "Không bắt buộc"})),
+    ("C07", "ẢNH CHỤP: Karaoke 5 tầng/500m²/18m -> bắt buộc vì CÔNG NĂNG, không vì quy mô",
+     P(ptype=KARAOKE, floors=5, area=500, floor_area=100, pccc=18),
+     dict(status="required", category="karaoke_entertainment", triggered=set(), items={1: "Không đạt", 2: "Không đạt", 9: "Không đạt", 10: "Khuyến nghị mạnh", 11: "Không đạt", 12: "Không đạt"},
+          compliant=0, no_thresholds=True)),
+    ("C08", "Karaoke 1 tầng/50m²/4m", P(ptype=KARAOKE, floors=1, area=50, pccc=4),
+     dict(status="required", category="karaoke_entertainment", triggered=set(), items={1: "Không đạt", 12: "Không đạt"}, no_thresholds=True)),
+    ("C09", "Karaoke chưa nhập số liệu: vẫn bắt buộc, mục phụ thuộc số liệu -> Cần xem xét", P(ptype=KARAOKE),
+     dict(status="required", category="karaoke_entertainment", triggered=set(), items={1: "Không đạt", 9: "Không đạt", 11: "Không đạt", 12: "Không đạt", 2: "Cần xem xét", 10: "Cần xem xét"})),
+    ("C10", "Kho 1 tầng/999m²/8m", P(ptype="Nhà kho xếp giá đỡ kệ cao", floors=1, area=999, pccc=8),
+     dict(status="not_required", category="warehouse", triggered=set(), items={1: "Không bắt buộc"}, warning_contains="Nhóm nhà kho")),
+    ("C11", "Kho 1 tầng/1.000m²", P(ptype="Nhà kho xếp giá đỡ kệ cao", floors=1, area=1000, pccc=8),
+     dict(status="required", category="warehouse", triggered={"totalFloorArea"}, items={1: "Không đạt"})),
+    ("C12", "Kho 2 tầng/500m² cao 25m (chỉ nhập chiều cao PCCC)", P(ptype="Nhà kho xếp giá đỡ kệ cao", floors=2, area=500, pccc=25),
+     dict(status="required", category="warehouse", triggered={"height"}, items={1: "Không đạt"})),
+    ("C13", "Chợ/TTTM 2 tầng/1.499m²", P(ptype="Chợ, Trung tâm thương mại", floors=2, area=1499, pccc=9),
+     dict(status="not_required", category="market_mall", triggered=set(), items={1: "Không bắt buộc"})),
+    ("C14", "Chợ/TTTM 3 tầng/600m²", P(ptype="Chợ, Trung tâm thương mại", floors=3, area=600, pccc=12),
+     dict(status="required", category="market_mall", triggered={"floors"}, items={1: "Không đạt"})),
+    ("C15", "Chợ/TTTM 1 tầng/1.500m²", P(ptype="Chợ, Trung tâm thương mại", floors=1, area=1500, pccc=6),
+     dict(status="required", category="market_mall", triggered={"totalFloorArea"}, items={1: "Không đạt"})),
+    ("C16", "Trường học 2 tầng/1.499m²", P(ptype="Cơ sở giáo dục, trường học", floors=2, area=1499, pccc=8),
+     dict(status="not_required", category="school", triggered=set(), items={1: "Không bắt buộc"})),
+    ("C17", "Trường học 3 tầng/900m²", P(ptype="Cơ sở giáo dục, trường học", floors=3, area=900, pccc=11),
+     dict(status="required", category="school", triggered={"floors"}, items={1: "Không đạt"})),
+    ("C18", "Gara ô tô (dropdown) 8 tầng/2.000m²: nhóm được nhận diện, chưa có ngưỡng riêng", P(ptype="Gara ô tô", floors=8, area=2000, pccc=26, rating="Bậc II"),
+     dict(status="required", category="garage", triggered={"floors"}, items={1: "Không đạt"}, warning_contains="CHƯA có ngưỡng thẩm duyệt riêng")),
+    ("C19", "Nhà máy (dropdown) 2 tầng/500m²", P(ptype="Nhà máy, nhà xưởng sản xuất", floors=2, area=500, pccc=9),
+     dict(status="not_required", category="factory", triggered=set(), items={1: "Không bắt buộc"}, warning_contains="CHƯA có ngưỡng thẩm duyệt riêng")),
+    ("C20", "Rạp hát/hội trường 1 tầng/3.200m²", P(ptype="Rạp hát, hội trường, trung tâm tổ chức sự kiện", floors=1, area=3200, pccc=10),
+     dict(status="required", category="assembly", triggered={"totalFloorArea"}, items={1: "Không đạt"})),
+    ("C21", "Văn phòng/khách sạn 5 tầng/800m² (không còn bị gắn nhãn F1.4)", P(ptype="Văn phòng, khách sạn công cộng", floors=5, area=800, pccc=18, rating="Bậc II"),
+     dict(status="not_required", category="office_hotel", triggered=set(), items={2: "Đạt"}, warning_contains="CHƯA có ngưỡng thẩm duyệt riêng")),
+    ("C22", "Nhà ở riêng lẻ (không KD) 3 tầng/200m²", P(ptype="Nhà ở riêng lẻ", floors=3, area=200, pccc=10),
+     dict(status="not_required", category="private_house", triggered=set(), items={1: "Không bắt buộc"}, no_warning_contains="CHƯA có ngưỡng")),
+    ("C23", "Loại công trình tự do chưa nhận diện", P(ptype="Công trình khác", floors=3, area=200, pccc=10),
+     dict(status="not_required", category="unclassified", triggered=set(), items={1: "Không bắt buộc"}, warning_contains="CHƯA nhận diện")),
+    ("C24", "Để trống loại công trình", P(ptype="", floors=5, area=500, pccc=18),
+     dict(status="insufficient_data", category="unclassified", triggered=set(), items={1: "Cần xem xét"}, missing_contains="type")),
+    ("C25", "Chưa nhập số tầng (diện tích dưới ngưỡng)", P(floors=0, area=500, pccc=18),
+     dict(status="insufficient_data", category="mixed_residential", triggered=set(), items={1: "Cần xem xét", 2: "Cần xem xét", 9: "Cần xem xét", 10: "Cần xem xét", 11: "Không đạt", 12: "Không bắt buộc"},
+          missing_contains="floors", compliant=1)),  # mục 12 chỉ phụ thuộc chiều cao PCCC (18m<30m đã nhập) nên vẫn xác định được
+    ("C26", "Chưa nhập diện tích (số tầng dưới ngưỡng)", P(floors=5, area=0, pccc=18),
+     dict(status="insufficient_data", category="mixed_residential", triggered=set(), items={1: "Cần xem xét"}, missing_contains="totalFloorArea")),
+    ("C27", "8 tầng, chưa nhập diện tích: đã ĐẠT ngưỡng tầng nên vẫn kết luận được", P(floors=8, area=0, pccc=25, rating="Bậc II"),
+     dict(status="required", category="mixed_residential", triggered={"floors"}, items={1: "Không đạt"})),
+    ("C28", "Hồ sơ rỗng hoàn toàn", {},
+     dict(status="insufficient_data", category="unclassified", triggered=set(), items={1: "Cần xem xét"})),
+    ("C29", "Số liệu dạng chuỗi từ OCR: '5 tầng', '1.200', '12,5'",
+     {"type": MIXED, "floors": "5 tầng", "totalFloorArea": "1.200", "pcccHeight": "12,5", "fireRating": "Bậc II"},
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={1: "Không bắt buộc", 2: "Đạt", 12: "Không bắt buộc"}, scale_text="5 tầng nổi, 1.200 m² sàn")),
+    ("C30", "Nhà ở KD, ghi chú 'tạp hoá đối diện trường học' -> vẫn là nhà ở, KHÔNG thành trường học",
+     P(floors=3, area=300, pccc=10, details="Tầng 1 kinh doanh tạp hoá đối diện trường học"),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={1: "Không bắt buộc"})),
+    ("C31", "Loại chưa xác định + ghi chú 'gần chợ' -> KHÔNG thành chợ",
+     P(ptype="Cơ sở kinh doanh", floors=3, area=300, pccc=10, details="cửa hàng gần chợ"),
+     dict(status="not_required", category="unclassified", triggered=set(), items={1: "Không bắt buộc"})),
+    ("C32", "Nhà ở KD có ghi chú 'karaoke gia đình' -> nâng lên nhóm karaoke (fail-safe)",
+     P(floors=3, area=300, pccc=10, details="Tầng 1 karaoke gia đình"),
+     dict(status="required", category="karaoke_entertainment", triggered=set(), items={1: "Không đạt"}, evidence_contains="Chi tiết kinh doanh")),
+    ("C33", "Nhà ở KD, tầng 2 chọn công năng Karaoke/Bar -> nâng nhóm karaoke",
+     P(floors=4, area=400, pccc=14, ff=["Nhà ở riêng lẻ / Dân dụng", "Dịch vụ giải trí Karaoke, Vũ trường", "Nhà ở riêng lẻ / Dân dụng", "Nhà ở riêng lẻ / Dân dụng"]),
+     dict(status="required", category="karaoke_entertainment", triggered=set(), items={1: "Không đạt"}, evidence_contains="tầng 2")),
+    ("C34", "5 tầng, chưa chọn bậc chịu lửa -> mục 2 không được chấm 'Không đạt'", P(floors=5, area=500, pccc=18, rating="Chưa lựa chọn"),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={2: "Cần xem xét"})),
+    ("C35a", "4 tầng Bậc III", P(floors=4, area=400, pccc=14, rating="Bậc III"),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={2: "Đạt"})),
+    ("C35b", "4 tầng Bậc V -> cần đối chiếu", P(floors=4, area=400, pccc=14, rating="Bậc V"),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={2: "Cần xem xét"})),
+    ("C36", "10 tầng/5.000m²/35m Bậc I", P(floors=10, area=5000, pccc=35, rating="Bậc I"),
+     dict(status="required", category="mixed_residential", triggered={"floors", "totalFloorArea"}, items={1: "Không đạt", 2: "Đạt", 9: "Không đạt", 11: "Không đạt", 12: "Không đạt"})),
+    ("C37", "Chỉ có chiều cao công trình 31m (OCR), PCCC=0 -> dùng chiều cao hiệu lực", P(floors=9, area=2500, pccc=0, height=31, rating="Bậc II"),
+     dict(status="required", category="mixed_residential", triggered={"floors"}, items={12: "Không đạt", 11: "Không đạt"})),
+    ("C38", "Chưa nhập chiều cao -> mục 11/12 'Cần xem xét', không đoán", P(floors=5, area=500, pccc=0, height=0),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={11: "Cần xem xét", 12: "Cần xem xét"})),
+    ("C39", "Viết hoa 'KARAOKE' / 'Quán Bar'", P(ptype="QUÁN BAR KARAOKE", floors=2, area=200, pccc=8),
+     dict(status="required", category="karaoke_entertainment", triggered=set(), items={1: "Không đạt"})),
+    ("C40", "Từ 'khoảng' không được khớp nhầm 'kho'", P(ptype="Nhà ở khoảng 3 tầng", floors=3, area=200, pccc=10),
+     dict(status="not_required", category="private_house", triggered=set(), items={1: "Không bắt buộc"})),
+    ("C41", "Từ 'discount' không được khớp nhầm 'disco'", P(floors=3, area=300, pccc=10, details="cửa hàng discount quần áo"),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={1: "Không bắt buộc"})),
+    ("C42", "Diện tích xây dựng × số tầng lệch tổng sàn -> có cảnh báo lệch", P(floors=5, area=900, floor_area=100, pccc=18),
+     dict(status="not_required", category="mixed_residential", triggered=set(), items={1: "Không bắt buộc"}, area_mismatch=True)),
+]
+
+# ------------------------------------------------------------------
+# Bất biến G1..G13
+# ------------------------------------------------------------------
+_NEG = re.compile(r"(không|chưa)\s+(thuộc diện\s+)?(bắt buộc|cưỡng bức)|dưới ngưỡng bắt buộc|không đủ để khẳng định")
+
+
+def check_invariants(project, ev, label):
+    errs = []
+    basis = ev["appraisalBasis"]
+    cl = ev["checklist"]
+    status = basis["status"]
+
+    # G1
+    if [c["stt"] for c in cl] != list(range(1, 18)):
+        errs.append("G1: checklist không đủ 17 mục theo thứ tự")
+    # G2
+    mapping = {"required": "Không đạt", "not_required": "Không bắt buộc", "insufficient_data": "Cần xem xét"}
+    if cl[0]["result"] != mapping[status]:
+        errs.append(f"G2: mục 1 = {cl[0]['result']} nhưng status = {status}")
+    if ev["isSubjectToAppraisal"] != (status == "required"):
+        errs.append("G2b: isSubjectToAppraisal lệch status")
+    # G3
+    if status == "required" and "BẮT BUỘC thẩm duyệt" not in basis["summary"] + basis["conclusion"]:
+        errs.append("G3: required nhưng lý do không nói bắt buộc")
+    if status != "required" and re.search(r"BẮT BUỘC thẩm duyệt", basis["summary"] + basis["conclusion"]):
+        errs.append("G3: không phải required nhưng lý do nói BẮT BUỘC thẩm duyệt")
+    # G4: "ĐẠT HOẶC VƯỢT" chỉ khi có ngưỡng đã đạt
+    met_rows = [r for r in basis["thresholds"] if r["state"] == "met"]
+    if "ĐẠT HOẶC VƯỢT" in basis["conclusion"] and not met_rows:
+        errs.append("G4: câu 'ĐẠT HOẶC VƯỢT' xuất hiện khi không có ngưỡng nào đạt  <-- LỖI TRONG ẢNH")
+    if status == "required" and basis["ruleMode"] == "threshold" and "ĐẠT HOẶC VƯỢT" not in basis["conclusion"]:
+        errs.append("G4b: required theo ngưỡng nhưng kết luận không nêu ngưỡng đạt")
+    # G5/G6: ngưỡng tính độc lập
+    vals = {"floors": to_number(project.get("floors")), "totalFloorArea": to_number(project.get("totalFloorArea")),
+            "height": effective_height(project)}
+    info = CATEGORY_INFO[basis["category"]]
+    if len(basis["thresholds"]) != len(info["thresholds"]):
+        errs.append("G5: số ngưỡng lệch danh mục")
+    for row in basis["thresholds"]:
+        actual = vals[row["key"]]
+        exp = "missing" if actual <= 0 else ("met" if actual >= row["limit"] else "not_met")
+        if row["state"] != exp:
+            errs.append(f"G5: ngưỡng {row['key']} state={row['state']} kỳ vọng {exp} (actual={actual}, limit={row['limit']})")
+    if set(basis["triggeredBy"]) != {r["key"] for r in met_rows}:
+        errs.append("G6: triggeredBy lệch")
+    expected_required = info["rule"] == "always" or bool(met_rows)
+    if (status == "required") != expected_required:
+        errs.append("G6b: status required không khớp quy tắc ngưỡng")
+    # G7: số liệu thực xuất hiện trong lý do
+    text = basis["summary"] + " " + basis["conclusion"]
+    if status in ("required", "not_required") and info["rule"] == "threshold":
+        rows_must_show = met_rows if status == "required" else basis["thresholds"]
+        for row in rows_must_show:
+            if row["actualText"] not in text:
+                errs.append(f"G7: lý do thiếu giá trị thực '{row['actualText']}' của {row['key']}")
+    # G8: note-vs-result
+    for c in cl:
+        note, res, stt = c["note"], c["result"], c["stt"]
+        low = _NEG.sub("", note.lower())
+        if res == "Không bắt buộc" and "bắt buộc" in low:
+            errs.append(f"G8: mục {stt} 'Không bắt buộc' nhưng note nói bắt buộc")
+        if res in ("Khuyến nghị", "Khuyến nghị mạnh") and re.search(r"bắt buộc|yêu cầu|\bphải\b", low):
+            errs.append(f"G8: mục {stt} '{res}' nhưng note dùng ngôn từ bắt buộc")
+        if res == "Không đạt" and re.search(r"không bắt buộc", note.lower()):
+            errs.append(f"G8: mục {stt} 'Không đạt' nhưng note nói không bắt buộc")
+        if res == "Cần xem xét" and stt in (1, 2, 9, 10, 11, 12):
+            if not re.search(r"chưa đủ|chưa chọn|cần đối chiếu", note.lower()):
+                errs.append(f"G8: mục {stt} 'Cần xem xét' không nêu lý do thiếu dữ liệu")
+    # G9/G10
+    if json.dumps(ev, ensure_ascii=False, sort_keys=True) != json.dumps(evaluate_appraisal(project), ensure_ascii=False, sort_keys=True):
+        errs.append("G9: không tái lập")
+    # G11
+    fl, fa, ta = vals["floors"], to_number(project.get("floorArea")), vals["totalFloorArea"]
+    mismatch = fl > 0 and fa > 0 and abs(ta - fa * fl) > 10
+    if mismatch != (AREA_MISMATCH_WARNING in ev["warnings"]):
+        errs.append("G11: cảnh báo lệch diện tích không khớp công thức")
+    # G13 không có chuỗi rác
+    for c in cl:
+        if re.search(r"None|nan|undefined|\{|\}", c["note"]):
+            errs.append(f"G13: mục {c['stt']} chứa chuỗi rác: {c['note'][:60]}")
+    if re.search(r"None|nan|undefined|\{|\}", basis["summary"] + basis["conclusion"]):
+        errs.append("G13: lý do chứa chuỗi rác")
+    return [f"[{label}] {e}" for e in errs]
+
+
+def run_case(case):
+    cid, desc, project, exp = case
+    before = copy.deepcopy(project)
+    ev = evaluate_appraisal(project)
+    errs = []
+    if project != before:
+        errs.append(f"[{cid}] G12: evaluate_appraisal làm thay đổi dữ liệu đầu vào")
+    errs += check_invariants(project, ev, cid)
+    b = ev["appraisalBasis"]
+    if b["status"] != exp["status"]:
+        errs.append(f"[{cid}] status = {b['status']}, kỳ vọng {exp['status']}")
+    if b["category"] != exp["category"]:
+        errs.append(f"[{cid}] category = {b['category']}, kỳ vọng {exp['category']}")
+    if set(b["triggeredBy"]) != exp["triggered"]:
+        errs.append(f"[{cid}] triggeredBy = {b['triggeredBy']}, kỳ vọng {sorted(exp['triggered'])}")
+    by_stt = {c["stt"]: c["result"] for c in ev["checklist"]}
+    for stt, want in exp.get("items", {}).items():
+        if by_stt[stt] != want:
+            errs.append(f"[{cid}] mục {stt} = '{by_stt[stt]}', kỳ vọng '{want}'")
+    if "compliant" in exp:
+        got = sum(1 for r in by_stt.values() if r in ("Đạt", "Không bắt buộc"))
+        if got != exp["compliant"]:
+            errs.append(f"[{cid}] số mục 'Đạt & Không bắt buộc' = {got}, kỳ vọng {exp['compliant']}")
+    if exp.get("no_thresholds") and b["thresholds"]:
+        errs.append(f"[{cid}] nhóm không phụ thuộc quy mô nhưng vẫn hiện ngưỡng")
+    if "warning_contains" in exp and not any(exp["warning_contains"] in w for w in ev["warnings"]):
+        errs.append(f"[{cid}] thiếu cảnh báo chứa '{exp['warning_contains']}'")
+    if "no_warning_contains" in exp and any(exp["no_warning_contains"] in w for w in ev["warnings"]):
+        errs.append(f"[{cid}] có cảnh báo không mong muốn '{exp['no_warning_contains']}'")
+    if "missing_contains" in exp and exp["missing_contains"] not in b["missingFields"]:
+        errs.append(f"[{cid}] missingFields = {b['missingFields']} thiếu '{exp['missing_contains']}'")
+    if "evidence_contains" in exp and exp["evidence_contains"] not in b["categoryEvidence"]:
+        errs.append(f"[{cid}] categoryEvidence = '{b['categoryEvidence']}' thiếu '{exp['evidence_contains']}'")
+    if "scale_text" in exp and b["actualScale"] != exp["scale_text"]:
+        errs.append(f"[{cid}] actualScale = '{b['actualScale']}', kỳ vọng '{exp['scale_text']}'")
+    if exp.get("area_mismatch") and AREA_MISMATCH_WARNING not in ev["warnings"]:
+        errs.append(f"[{cid}] thiếu cảnh báo lệch diện tích")
+    return errs
+
+
+def fuzz(n=3000, seed=20241):
+    rnd = random.Random(seed)
+    types = list(CATEGORY_INFO.keys()) + [
+        MIXED, "Nhà ở riêng lẻ", KARAOKE, "Gara ô tô", "Văn phòng, khách sạn công cộng", "Nhà kho xếp giá đỡ kệ cao",
+        "Chợ, Trung tâm thương mại", "Nhà máy, nhà xưởng sản xuất", "Cơ sở giáo dục, trường học",
+        "Rạp hát, hội trường, trung tâm tổ chức sự kiện", "", None, "Linh tinh 123", "karaoke", "nhà kho", "trường mầm non",
+    ]
+    nums = [None, 0, "", 1, 2, 3, 4, 5, 6, 7, 8, 12, 25, 99, 100, 499.5, 999, 1000, 1499, 1500, 2999, 3000, 3001, 5000, 12000, "7 tầng", "3.000", "12,5", "abc", -3, float("nan")]
+    ratings = ["Bậc I", "Bậc II", "Bậc III", "Bậc IV", "Bậc V", "Chưa lựa chọn", "", None]
+    details = ["", None, "karaoke", "gần chợ", "đối diện trường học", "kho hàng", "cửa hàng discount", "Tầng 1 văn phòng"]
+    funcs = ["Nhà ở riêng lẻ / Dân dụng", "Dịch vụ giải trí Karaoke, Vũ trường", "Nhà kho lưu trữ hàng hóa", None, 5]
+    fails = []
+    for i in range(n):
+        proj = {"type": rnd.choice(types), "floors": rnd.choice(nums), "totalFloorArea": rnd.choice(nums),
+                "floorArea": rnd.choice(nums), "pcccHeight": rnd.choice(nums), "height": rnd.choice(nums),
+                "fireRating": rnd.choice(ratings), "commercialDetails": rnd.choice(details),
+                "floorFunctions": [rnd.choice(funcs) for _ in range(rnd.randint(0, 6))]}
+        try:
+            ev = evaluate_appraisal(proj)
+            fails += check_invariants(proj, ev, f"fuzz#{i}") if False else [f"{e} | input={proj}" for e in check_invariants(proj, ev, f"fuzz#{i}")]
+        except Exception as exc:  # noqa: BLE001
+            fails.append(f"[fuzz#{i}] NGOẠI LỆ {type(exc).__name__}: {exc} | input={proj}")
+        if len(fails) > 15:
+            break
+    return fails
+
+
+def test_all_scenarios():
+    errs = []
+    for case in CASES:
+        errs += run_case(case)
+    assert not errs, "\n".join(errs)
+
+
+def test_fuzz():
+    fails = fuzz()
+    assert not fails, "\n".join(fails[:15])
+
+
+if __name__ == "__main__":
+    total_err = 0
+    print(f"=== {len(CASES)} KỊCH BẢN ===")
+    for case in CASES:
+        errs = run_case(case)
+        total_err += len(errs)
+        print(("PASS " if not errs else "FAIL ") + f"{case[0]:5s} {case[1]}")
+        for e in errs:
+            print("      ->", e)
+    print("\n=== FUZZ 3.000 hồ sơ ngẫu nhiên (kiểm tra 13 bất biến + không ngoại lệ) ===")
+    fails = fuzz()
+    total_err += len(fails)
+    print("PASS fuzz" if not fails else "FAIL fuzz")
+    for f in fails[:15]:
+        print("      ->", f[:400])
+    print(f"\nTỔNG LỖI: {total_err}")
+    sys.exit(1 if total_err else 0)

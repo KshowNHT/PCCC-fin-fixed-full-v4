@@ -6,7 +6,7 @@ import { ProjectInfo } from '../types';
 interface BlueprintUploadProps {
   sessionId: string;
   onClose: () => void;
-  onApply: (extracted: Partial<ProjectInfo>) => void;
+  onApply: (extracted: Partial<ProjectInfo>) => Promise<void>;
 }
 
 /**
@@ -18,6 +18,7 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
   const [isDragging, setIsDragging] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [error, setError] = useState('');
+  const [coverage, setCoverage] = useState<string>('');
   const [extracted, setExtracted] = useState<Partial<ProjectInfo> | null>(null);
 
   const handleFile = (f: File | null) => {
@@ -45,6 +46,7 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
     try {
       const formData = new FormData();
       formData.append('file', file);
+      formData.append('apply_to_session', 'false');
       if (sessionId) formData.append('session_id', sessionId);
 
       const res = await apiFetch('/api/ocr/extract-drawing', { method: 'POST', body: formData });
@@ -54,6 +56,7 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
       }
       const data = await res.json();
       setExtracted(data.extractedProjectInfo || {});
+      setCoverage(data.coverage ? `${data.coverage.pagesRead} trang đã đọc. ${data.coverage.notice}` : '');
     } catch (e: any) {
       setError(e.message || 'Có lỗi xảy ra khi xử lý bản vẽ.');
     } finally {
@@ -81,7 +84,7 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
         <div className="p-5 space-y-4">
           <p className="text-sm text-slate-500">
             Tải lên bản vẽ mặt bằng / mặt cắt / khung tên (PDF hoặc ảnh). AI sẽ tự động đọc và bóc tách
-            các thông số kỹ thuật để điền vào form dự án.
+            các thông số kỹ thuật để điền vào form dự án. Hồ sơ nhiều nhà được trích xuất thành danh sách hạng mục để kiểm tra và sửa riêng từng nhà; không dùng diện tích nhà lớn nhất làm tổng diện tích dự án.
           </p>
 
           <div
@@ -124,6 +127,7 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
             </button>
           )}
 
+          {coverage && <p className="text-xs text-amber-800">{coverage}</p>}
           {extracted && (
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-md p-3">
@@ -134,10 +138,12 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
                 {Object.entries(extracted).map(([key, value]) => (
                   <div key={key} className="flex justify-between px-3 py-2 text-sm">
                     <span className="text-slate-500">{fieldLabels[key] || key}</span>
-                    <span className="text-slate-800 font-medium text-right ml-4">{Array.isArray(value) ? value.join(', ') : String(value)}</span>
+                    <span className="text-slate-800 font-medium text-right ml-4">{key === "components" ? `${extracted.components?.length || 0} hạng mục (chi tiết bên dưới)` : Array.isArray(value) ? value.join(', ') : String(value)}</span>
                   </div>
                 ))}
               </div>
+              {extracted.components?.map(c=><div key={c.id} className="border rounded p-2 text-sm"><strong>{c.name} — {c.type || 'Chưa rõ công năng'}</strong><p>{c.floors || '?'} tầng; cao {c.height || '?'} m; tổng sàn {c.totalFloorArea || '?'} m²; khối tích {c.volume || '?'} m³; hạng {c.hazardClass || '?'}; {c.fireRating || 'Chưa rõ bậc chịu lửa'}</p><p className="whitespace-pre-wrap text-xs">Trang {c.sourcePages.join(', ')}: {c.sourceText}</p></div>)}
+              {extracted.components?.length ? <p className="text-xs text-amber-800">Áp dụng sẽ thay danh sách hạng mục hiện tại bằng danh sách này. Sau đó sửa từng nhà, xác nhận danh sách đầy đủ và bấm Kiểm duyệt. Dòng tổng hợp không phải một nhà.</p> : null}
               <div className="flex gap-2">
                 <button
                   onClick={() => { setExtracted(null); setFile(null); }}
@@ -146,7 +152,13 @@ export function BlueprintUpload({ sessionId, onClose, onApply }: BlueprintUpload
                   Thử lại
                 </button>
                 <button
-                  onClick={() => onApply(extracted)}
+                  disabled={isProcessing}
+                  onClick={async () => {
+                    setIsProcessing(true);
+                    try { await onApply(extracted); }
+                    catch (e: any) { setError(e.message || 'Chưa áp dụng được dữ liệu OCR.'); }
+                    finally { setIsProcessing(false); }
+                  }}
                   className="flex-1 py-2 rounded-md bg-green-600 text-white text-sm font-medium hover:bg-green-700"
                 >
                   Áp dụng vào form dự án

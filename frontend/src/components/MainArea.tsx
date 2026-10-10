@@ -25,7 +25,8 @@ import {
   Eye,
   EyeOff
 } from "lucide-react";
-import { ChatMessage, ChecklistItem, ProjectInfo } from "../types";
+import { AppraisalBasis, ChatMessage, ChecklistItem, ProjectInfo } from "../types";
+import { LegalBasisPanel, VERDICT_STYLES, VerdictIcon, resolveStatus, verdictHeading } from "./LegalBasisPanel";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
 
 interface MainAreaProps {
@@ -38,8 +39,10 @@ interface MainAreaProps {
   checklist: ChecklistItem[];
   isSubjectToAppraisal: boolean;
   appraisalReason: string;
+  appraisalBasis?: AppraisalBasis | null;
   warnings: string[];
   projectInfo: ProjectInfo;
+  reviewState?: "draft" | "reviewed";
   onExportReport: () => void;
   isExporting: boolean;
   onExportReportPdf: () => void;
@@ -64,6 +67,7 @@ const QUICK_PROMPTS = [
 ];
 
 export function MainArea({
+  reviewState = "reviewed",
   sessionTitle,
   messages,
   onSendMessage,
@@ -73,8 +77,9 @@ export function MainArea({
   checklist,
   isSubjectToAppraisal,
   appraisalReason,
+  appraisalBasis,
   warnings,
-  projectInfo,
+  projectInfo: storedProjectInfo,
   onExportReport,
   isExporting,
   onExportReportPdf,
@@ -82,6 +87,10 @@ export function MainArea({
   isSidebarOpen,
   onToggleSidebar
 }: MainAreaProps) {
+  // A multi-building project has no single-house scale; never show old root numbers as its result.
+  const projectInfo = storedProjectInfo.components?.length ? {...storedProjectInfo,
+    type: 'Dự án nhiều hạng mục — xem từng nhà', floors: 0, basements: 0,
+    height: 0, pcccHeight: 0, floorArea: 0, totalFloorArea: 0, fireRating: ''} : storedProjectInfo;
   const [activeTab, setActiveTab] = useState<"chat" | "checklist" | "verdict" | "full-checklist" | "full-verdict">("chat");
   const [inputText, setInputText] = useState("");
   const [quickSearchText, setQuickSearchText] = useState("");
@@ -104,8 +113,8 @@ export function MainArea({
     const floors = projectInfo.floors || 0;
     const floorArea = projectInfo.floorArea || 0;
     const totalFloorArea = projectInfo.totalFloorArea || 0;
-    return floors > 0 && floorArea > 0 && Math.abs(totalFloorArea - floorArea * floors) > 10;
-  }, [projectInfo.floors, projectInfo.floorArea, projectInfo.totalFloorArea]);
+    return reviewState === "reviewed" && floors > 0 && floorArea > 0 && totalFloorArea > 0 && Math.abs(totalFloorArea - floorArea * floors) > 10;
+  }, [reviewState, projectInfo.floors, projectInfo.floorArea, projectInfo.totalFloorArea]);
 
   // FIX B19 (tiếp): danh sách cảnh báo hiển thị = cảnh báo mâu thuẫn diện
   // tích LUÔN tính tức thời (không đợi server) + các cảnh báo KHÁC từ server
@@ -114,9 +123,14 @@ export function MainArea({
   const AREA_WARNING_TEXT =
     "Tổng diện tích sàn khai báo không trùng khớp với tích số giữa (diện tích sàn x số tầng), cần đối chiếu kiểm tra thực tế.";
   const displayWarnings = React.useMemo(() => {
-    const others = (warnings || []).filter((w) => w !== AREA_WARNING_TEXT);
+    const others = (warnings || []).filter((w) => !w.startsWith(AREA_WARNING_TEXT));
     return hasAreaContradiction ? [AREA_WARNING_TEXT, ...others] : others;
   }, [warnings, hasAreaContradiction]);
+
+  // Trạng thái kết luận 3 giá trị (bắt buộc / không bắt buộc / chưa đủ thông số) do
+  // BACKEND quyết định. Nếu server cũ chưa trả `appraisalBasis` thì lùi về cờ nhị phân.
+  const verdictStatus = resolveStatus(appraisalBasis, isSubjectToAppraisal);
+  const verdictStyle = VERDICT_STYLES[verdictStatus];
   const [checklistSearchQuery, setChecklistSearchQuery] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -388,6 +402,8 @@ export function MainArea({
           phần còn lại trắng, khung nhập không neo đáy. Đổi outer container
           thành `overflow-hidden` (không tự cuộn), giao toàn bộ việc cuộn
           cho các vùng con bên trong (đã có sẵn overflow-y-auto riêng). */}
+      {reviewState === "reviewed" && appraisalBasis?.componentResults && <section className="max-h-48 sm:max-h-64 overflow-y-auto flex-shrink-0 p-4 border-b space-y-2"><strong>Kết quả từng hạng mục độc lập</strong>{appraisalBasis.componentResults.map(c=><article key={c.id} className="border rounded p-2 text-sm"><strong>{c.name} — {c.appraisalBasis.categoryLabel}</strong><p>{c.appraisalBasis.actualScale}</p><p>{c.appraisalBasis.summary}</p><p className="text-xs text-slate-600">{c.appraisalBasis.legalText}</p></article>)}</section>}
+      {reviewState !== "reviewed" && <div role="status" className="px-4 py-3 bg-amber-50 text-amber-900 border-b border-amber-200 text-sm">Bản nháp — chưa rà soát. Nhập xong thông số và bấm Kiểm duyệt hồ sơ. Kết quả cũ không áp dụng cho các thông số đang sửa.</div>}
       {/* Top action header bar */}
       <div id="main-action-header" className="sticky top-0 bg-white border-b border-slate-200 px-3 sm:px-6 py-3 sm:py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 shadow-sm z-25 flex-shrink-0 print:hidden">
         <div className="flex items-center gap-3">
@@ -660,7 +676,7 @@ export function MainArea({
                     <div className="flex justify-between items-center text-[11px]">
                       <span className="font-extrabold text-slate-705 flex items-center gap-1.5">
                         <Award className="w-4 h-4 text-brand-orange shrink-0 animate-pulse" />
-                        TỈ LỆ ĐÁP ỨNG QUY CHUẨN KỸ THUẬT:
+                        TIẾN ĐỘ XÁC NHẬN HẠNG MỤC:
                       </span>
                       <span className={`font-mono font-extrabold text-sm ${
                         compliancePercentage >= 80 ? "text-emerald-600" : compliancePercentage >= 50 ? "text-amber-600" : "text-rose-600"
@@ -670,7 +686,7 @@ export function MainArea({
                             ghi "hạng mục đạt" — gây hiểu nhầm là đã kiểm tra
                             và đạt yêu cầu. Đồng bộ nhãn giống tab Kết luận Pháp
                             lý ("Đạt & Không bắt buộc") ở mọi nơi trên giao diện. */}
-                        {compliancePercentage}% ({compliantCount}/{totalItems} đạt & không bắt buộc)
+                        {compliantCount === 0 ? "Chưa có hạng mục được xác nhận" : `${compliancePercentage}% (${compliantCount}/${totalItems} đã xác nhận)`}
                       </span>
                     </div>
                     
@@ -732,12 +748,12 @@ export function MainArea({
                   <div className="flex items-center gap-2">
                     <Award className="w-4 h-4 text-brand-orange shrink-0 animate-pulse" />
                     <span className="text-[11px] font-black text-slate-750 uppercase tracking-tight">
-                      TỈ LỆ ĐÁP ỨNG QUY CHUẨN KỸ THUẬT:
+                      TIẾN ĐỘ XÁC NHẬN HẠNG MỤC:
                     </span>
                     <span className={`font-mono font-black text-xs ${
                       compliancePercentage >= 80 ? "text-emerald-600" : compliancePercentage >= 50 ? "text-amber-600" : "text-rose-600"
                     }`}>
-                      {compliancePercentage}% ({compliantCount}/{totalItems} đạt & không bắt buộc)
+                      {compliantCount === 0 ? "Chưa có hạng mục được xác nhận" : `${compliancePercentage}% (${compliantCount}/${totalItems} đã xác nhận)`}
                     </span>
                     {/* Mini inline bar */}
                     <div className="w-20 bg-slate-200 h-1.5 rounded-full overflow-hidden hidden sm:block ml-2">
@@ -800,7 +816,7 @@ export function MainArea({
           }`}
         >
           <ClipboardCheck className="w-3.5 h-3.5" />
-          Bảng 17 Mục Checklist
+          Bảng Checklist từng hạng mục
           {checklist.length > 0 && (
             <span className="font-mono text-[10px] text-white bg-brand-orange px-1.5 py-0.2 rounded-full">
               {checklist.length}
@@ -825,7 +841,7 @@ export function MainArea({
             className="py-3 px-2 font-bold text-xs flex items-center gap-1.5 border-b-2 border-brand-orange text-brand-orange bg-brand-orange/5 rounded-t-lg transition-all cursor-pointer shrink-0 animate-fade-in"
           >
             <Maximize2 className="w-3.5 h-3.5 text-brand-orange" />
-            <span className="text-slate-900 font-extrabold uppercase">🗂️ [Xem Rộng] 17 Mục Checklist</span>
+            <span className="text-slate-900 font-extrabold uppercase">🗂️ [Xem Rộng] Checklist từng hạng mục</span>
             <span 
               onClick={(e) => {
                 e.stopPropagation();
@@ -1017,7 +1033,7 @@ export function MainArea({
                   <div>
                     <h3 className="font-semibold text-slate-700">Chưa có kết quả phân tích</h3>
                     <p className="text-slate-400 text-sm max-w-sm mx-auto mt-1">
-                      Vui lòng cung cấp hồ sơ hoặc chat với chuyên gia để tự động kích hoạt bảng checklist kiểm duyệt 17 hạng mục đầy đủ.
+                      Nhập xong thông số từng nhà và bấm Kiểm duyệt hồ sơ để tạo kết quả rà soát.
                     </p>
                   </div>
                 </div>
@@ -1029,7 +1045,7 @@ export function MainArea({
                         Bảng kết quả rà soát chi tiết quy chuẩn
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
-                        Theo dõi chi tiết mức độ đáp ứng 17 hạng mục quy chuẩn an toàn PCCC
+                        Theo dõi chi tiết mức độ đáp ứng các hạng mục quy chuẩn an toàn PCCC
                       </p>
                     </div>
 
@@ -1222,7 +1238,7 @@ export function MainArea({
         })()}
 
         {/* TAB 2.5: EXPANDED FULL CHECKLIST VIEW */}
-        {(activeTab === "checklist" || activeTab === "full-checklist") && (() => {
+        {reviewState === "reviewed" && (activeTab === "checklist" || activeTab === "full-checklist") && (() => {
           return (
             <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 select-none print:static print:bg-white print:p-0 print:z-0 print:block animate-fade-in">
               <div className="bg-white w-full max-w-7xl h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl border border-slate-350 select-text animate-scale-up print:w-full print:h-auto print:shadow-none print:rounded-none print:overflow-visible print:block">
@@ -1234,7 +1250,7 @@ export function MainArea({
                     </div>
                     <div>
                       <h3 className="font-display font-black text-slate-900 text-base md:text-lg uppercase tracking-tight">
-                        Bảng 17 Mục Quy Chuẩn PCCC Toàn Màn Hình
+                        Bảng Checklist PCCC từng hạng mục Toàn Màn Hình
                       </h3>
                       <p className="text-[11px] text-slate-500 font-semibold uppercase font-mono tracking-wider">
                         Mức độ đáp ứng điều kiện an toàn &amp; phân tích quy phạm
@@ -1277,7 +1293,7 @@ export function MainArea({
                   <div>
                     <h3 className="font-semibold text-slate-700">Chưa có kết quả phân tích</h3>
                     <p className="text-slate-400 text-sm max-w-sm mx-auto mt-1">
-                      Vui lòng cung cấp hồ sơ hoặc chat với chuyên gia để tự động kích hoạt bảng checklist kiểm duyệt 17 hạng mục đầy đủ.
+                      Nhập xong thông số từng nhà và bấm Kiểm duyệt hồ sơ để tạo kết quả rà soát.
                     </p>
                   </div>
                 </div>
@@ -1288,7 +1304,7 @@ export function MainArea({
                   <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                     <div>
                       <h3 className="font-display font-black text-slate-900 text-[22px] uppercase">
-                        Bảng 17 Mục Quy chuẩn PCCC (Bản Phóng To)
+                        Bảng Checklist PCCC từng hạng mục (Bản Phóng To)
                       </h3>
                       <p className="text-xs text-slate-400 mt-0.5">
                         Theo dõi đầy đủ mức độ đáp ứng, lọc và tìm kiếm ở màn hình rộng
@@ -1534,30 +1550,20 @@ export function MainArea({
                   id="verdict-badge-card"
                   onClick={() => setActiveTab("full-verdict")}
                   className={`p-6 rounded-2xl border-2 flex items-center gap-5 transition-all duration-205 cursor-pointer hover:scale-[1.01] hover:shadow-lg ${
-                    isSubjectToAppraisal
-                      ? "bg-gradient-to-b from-orange-50 to-orange-100 border-orange-355 text-orange-950 shadow-[0_5px_0_0_#EA580C,0_8px_20px_rgba(234,88,12,0.15)]"
-                      : "bg-gradient-to-b from-emerald-50 to-emerald-100 border-emerald-355 text-emerald-950 shadow-[0_5px_0_0_#059669,0_8px_20px_rgba(5,150,105,0.15)]"
+                    verdictStyle.container
                   }`}
                   title="Click để phóng to kết luận pháp lý dạng Tab mới"
                 >
                   <div
                     className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white flex-shrink-0 bg-gradient-to-b ${
-                      isSubjectToAppraisal 
-                        ? "from-orange-500 to-orange-700 shadow-[0_4px_0_0_#9A3412,0_4px_10px_rgba(0,0,0,0.18)]" 
-                        : "from-emerald-500 to-emerald-700 shadow-[0_4px_0_0_#047857,0_4px_10px_rgba(0,0,0,0.18)]"
+                      verdictStyle.icon
                     }`}
                   >
-                    {isSubjectToAppraisal ? (
-                      <XCircle className="w-8 h-8" />
-                    ) : (
-                      <CheckCircle className="w-8 h-8" />
-                    )}
+                    <VerdictIcon status={verdictStatus} className="w-8 h-8" />
                   </div>
                   <div>
                     <h3 className="font-display font-black text-[20px] uppercase tracking-tight">
-                      {isSubjectToAppraisal
-                        ? "BẮT BUỘC THẨM DUYỆT THIẾT KẾ PHÒNG CHÁY CHỮA CHÁY"
-                        : "KHÔNG THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BỞI CƠ QUAN CÔNG AN"}
+                      {verdictHeading(verdictStatus, appraisalBasis)}
                     </h3>
                     <p className="text-xs mt-1.5 opacity-90 leading-relaxed font-sans font-bold text-black font-semibold">
                       {appraisalReason}
@@ -1565,29 +1571,8 @@ export function MainArea({
                   </div>
                 </div>
 
-                {/* Important legislative notices */}
-                <div id="verdict-legislative-notices" className="bg-white border-2 border-slate-350 rounded-xl p-5 space-y-3 shadow-md">
-                  <h4 className="font-display font-black text-[#6B0D0D] text-[18px] flex items-center gap-2 uppercase tracking-tight">
-                    <div className="w-6 h-6 rounded-lg bg-gradient-to-b from-red-500 to-red-700 flex items-center justify-center text-white shadow-[0_2.5px_0_0_#3B0707,0_2.5px_5px_rgba(0,0,0,0.15)] shrink-0">
-                      <Info className="w-3.5 h-3.5" />
-                    </div>
-                    Lưu ý Pháp lý Quan trọng (Nghị định 105/2025/NĐ-CP):
-                  </h4>
-                  <p className="text-xs text-black font-bold leading-relaxed">
-                    Theo quy định mới tại <strong className="font-black text-black decoration-brand-orange underline">Phụ lục III - Nghị định 105/2025/NĐ-CP</strong>, nhà ở hỗn hợp hoặc nhà ở riêng lẻ có kết hợp mục đích kinh doanh (nằm trong nhóm F1.4) chỉ thuộc diện thẩm duyệt bắt buộc khi đạt ngưỡng quy mô tối thiểu là <strong className="font-black text-black">cao từ 7 tầng nổi trở lên</strong> hoặc <strong className="font-black text-black">tổng diện tích sàn xây dựng từ 3.000 m² trở lên</strong>. 
-                  </p>
-                  <p className="text-xs text-black font-semibold leading-relaxed">
-                    {isSubjectToAppraisal ? (
-                      <span className="text-red-750 font-black mb-1 block">
-                        ➔ Hiện tại, công trình của bạn ĐẠT HOẶC VƯỢT một trong các ngưỡng pháp lý trên, do đó chủ đầu tư bắt buộc phải chuẩn bị đầy đủ hồ sơ thiết kế kỹ thuật PCCC để đệ trình cơ quan Cảnh sát PCCC chuyên môn phê duyệt trước khi thi công.
-                      </span>
-                    ) : (
-                      <span className="text-emerald-800 font-black mb-1 block">
-                        ➔ Công trình của bạn nằm dưới ngưỡng quy phạm trên nên không cần nộp hồ sơ thẩm duyệt cho công an. Tuy nhiên, Điều 20 Nghị định khẳng định chủ đầu tư vẫn hoàn toàn tự chịu trách nhiệm pháp lý thiết kế, xây dựng đạt đầy đủ quy phạm QCVN 06:2022/BXD và QCVN 10:2025/BCA. Hồ sơ PCCC phải lập để Ủy ban Nhân dân và Công an xã/phường kiểm tra định kỳ 3 năm một lần.
-                      </span>
-                    )}
-                  </p>
-                </div>
+                {/* Căn cứ pháp lý do BACKEND dựng — không còn ngưỡng/câu kết luận viết cứng ở frontend */}
+                <LegalBasisPanel basis={appraisalBasis} isSubjectToAppraisal={isSubjectToAppraisal} variant="compact" />
 
                 {/* Distribution of Checklist Results Pie Chart Card */}
                 <div id="verdict-pie-chart-card" className="bg-white border-2 border-slate-350 rounded-xl p-5 shadow-lg space-y-4">
@@ -1596,7 +1581,7 @@ export function MainArea({
                     <div>
                       <h4 className="font-display font-black text-slate-900 text-sm uppercase tracking-tight flex items-center gap-2">
                         <span className="w-2.5 h-2.5 rounded-full bg-brand-orange animate-pulse" />
-                        Phân bố 17 Hạng mục rà soát
+                        Phân bố các mục rà soát
                       </h4>
                       <p className="text-[11px] text-slate-400 mt-0.5">
                         Tỷ lệ trạng thái an toàn quy chuẩn của dự án: <span className="font-bold text-slate-600">{projectInfo.name || "hiện tại"}</span>
@@ -1676,7 +1661,7 @@ export function MainArea({
                             Tỉ lệ phân bố đánh giá
                           </h4>
                           <p className="text-[11px] text-slate-400 mt-0.5">
-                            Tổng hợp kết quả rà soát 17 hạng mục của dự án
+                            Tổng hợp kết quả rà soát các hạng mục của dự án
                           </p>
                         </div>
 
@@ -1761,15 +1746,15 @@ export function MainArea({
                 {/* Core regulatory checklist summary charts or indicators */}
                 <div id="verdict-summary-cards" className="grid grid-cols-2 gap-4">
                   <div className="bg-white border-2 border-slate-350 rounded-xl p-4 space-y-1.5 text-xs shadow-sm">
-                    <span className="text-black font-black font-display uppercase tracking-wider text-[10px]">Bậc chịu lửa yêu cầu xây dựng:</span>
-                    <p className="text-black font-black text-sm">
-                      {projectInfo.floors <= 4 ? "Bậc III (Tối thiểu theo Phụ lục H QCVN 06:2022)" : "Bậc II (Bản thiết kế cao tầng)"}
+                    <span className="text-black font-black font-display uppercase tracking-wider text-[10px]">Bậc chịu lửa tối thiểu theo quy mô:</span>
+                    <p className="text-black font-black text-sm" data-testid="min-fire-rating">
+                      {appraisalBasis?.minFireRatingText ?? "Chưa có dữ liệu — hãy kiểm duyệt hồ sơ"}
                     </p>
                   </div>
                   <div className="bg-white border-2 border-slate-350 rounded-xl p-4 space-y-1.5 text-xs shadow-sm">
-                    <span className="text-black font-black font-display uppercase tracking-wider text-[10px]">Công năng nguy hiểm cháy:</span>
-                    <p className="text-black font-black text-sm">
-                      F1.4 (Nhà ở riêng lẻ, nhà hỗn hợp kinh doanh)
+                    <span className="text-black font-black font-display uppercase tracking-wider text-[10px]">Nhóm công năng áp dụng:</span>
+                    <p className="text-black font-black text-sm" data-testid="category-card">
+                      {appraisalBasis?.categoryLabel ?? projectInfo.type ?? "Chưa xác định"}
                     </p>
                   </div>
                 </div>
@@ -1779,7 +1764,7 @@ export function MainArea({
         )}
 
         {/* TAB 3.5: EXPANDED FULL LEGAL VERDICT PAGE */}
-        {(activeTab === "verdict" || activeTab === "full-verdict") && (
+        {reviewState === "reviewed" && (activeTab === "verdict" || activeTab === "full-verdict") && (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 select-none print:static print:bg-white print:p-0 print:z-0 print:block animate-fade-in">
             <div className="bg-white w-full max-w-7xl h-[92vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl border border-slate-350 select-text animate-scale-up print:w-full print:h-auto print:shadow-none print:rounded-none print:overflow-visible print:block">
               {/* Modal Header */}
@@ -1874,30 +1859,20 @@ export function MainArea({
                     <div
                       id="full-verdict-badge-card"
                       className={`p-8 rounded-3xl border-2 flex flex-col md:flex-row items-start md:items-center gap-6 transition-all duration-200 ${
-                        isSubjectToAppraisal
-                          ? "bg-gradient-to-b from-orange-50 to-orange-100 border-orange-355 text-orange-950 shadow-[0_5px_0_0_#EA580C,0_8px_20px_rgba(234,88,12,0.15)]"
-                          : "bg-gradient-to-b from-emerald-50 to-emerald-100 border-emerald-355 text-emerald-950 shadow-[0_5px_0_0_#059669,0_8px_20px_rgba(5,150,105,0.15)]"
+                        verdictStyle.container
                       }`}
                     >
                       <div
                         className={`w-16 h-16 rounded-3xl flex items-center justify-center text-white flex-shrink-0 bg-gradient-to-b ${
-                          isSubjectToAppraisal 
-                            ? "from-orange-500 to-orange-700 shadow-[0_4px_0_0_#9A3412,0_4px_10px_rgba(0,0,0,0.18)]" 
-                            : "from-emerald-500 to-emerald-700 shadow-[0_4px_0_0_#047857,0_4px_10px_rgba(0,0,0,0.18)]"
+                          verdictStyle.icon
                         }`}
                       >
-                        {isSubjectToAppraisal ? (
-                          <XCircle className="w-10 h-10" />
-                        ) : (
-                          <CheckCircle className="w-10 h-10" />
-                        )}
+                        <VerdictIcon status={verdictStatus} className="w-10 h-10" />
                       </div>
                       <div>
                         <span className="text-[10px] md:text-[11px] font-black uppercase text-slate-500 tracking-wider">Trạng thái rà soát quy chuẩn</span>
                         <h2 className="font-display font-black text-[22px] md:text-[25px] uppercase tracking-tight mt-1 leading-tight">
-                          {isSubjectToAppraisal
-                            ? "BẮT BUỘC THẨM DUYỆT THIẾT KẾ PHÒNG CHÁY CHỮA CHÁY"
-                            : "KHÔNG THUỘC DIỆN THẨM DUYỆT THIẾT KẾ PCCC BỞI CƠ QUAN CÔNG AN"}
+                          {verdictHeading(verdictStatus, appraisalBasis)}
                         </h2>
                         <p className="text-sm mt-2 opacity-95 leading-relaxed font-sans font-bold text-black border-t border-black/15 pt-2">
                           {appraisalReason}
@@ -1905,49 +1880,8 @@ export function MainArea({
                       </div>
                     </div>
 
-                    {/* Important legislative notices expanded layout */}
-                    <div id="full-verdict-legislative-notices" className="bg-white border-2 border-slate-350 rounded-2xl p-6 space-y-4 shadow-lg flex-1">
-                      <h4 className="font-display font-black text-[#6B0D0D] text-[20px] flex items-center gap-2 uppercase tracking-tight">
-                        <div className="w-7 h-7 rounded-lg bg-gradient-to-b from-red-500 to-red-700 flex items-center justify-center text-white shadow-[0_2.5px_0_0_#3B0707,0_2.5px_5px_rgba(0,0,0,0.15)] shrink-0">
-                          <Info className="w-4 h-4" />
-                        </div>
-                        Lưu ý Pháp lý Quan trọng (Nghị định 105/2025/NĐ-CP):
-                      </h4>
-                      <p className="text-sm text-black font-semibold leading-relaxed">
-                        Theo quy định mới nhất tại <strong className="font-black text-black decoration-brand-orange underline">Phụ lục III - Nghị định 105/2025/NĐ-CP</strong>, nhà ở hỗn hợp hoặc nhà ở riêng lẻ có kết hợp mục đích kinh doanh (nằm trong nhóm F1.4) chỉ thuộc diện thẩm duyệt bắt buộc khi đạt một trong các ngưỡng quy mô tối thiểu sau:
-                      </p>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="p-4 rounded-xl border-2 border-dashed border-orange-355 bg-orange-50/50 space-y-1">
-                          <span className="text-xs font-black text-orange-950 uppercase">Ngưỡng Số Tầng Nổi:</span>
-                          <p className="text-black font-black text-sm">Chiều cao từ 7 tầng nổi trở lên</p>
-                          <span className="text-xs text-orange-850 font-bold block">
-                            (Công trình của bạn: {projectInfo.floors} tầng)
-                          </span>
-                        </div>
-                        <div className="p-4 rounded-xl border-2 border-dashed border-orange-355 bg-orange-50/50 space-y-1">
-                          <span className="text-xs font-black text-orange-950 uppercase">Ngưỡng Diện Tích Sàn:</span>
-                          <p className="text-black font-black text-sm">Tổng diện tích từ 3.000 m² trở lên</p>
-                          <span className="text-xs text-orange-850 font-bold block">
-                            (Công trình của bạn: {projectInfo.totalFloorArea} m²)
-                          </span>
-                        </div>
-                      </div>
-
-                      <p className="text-sm text-black font-bold leading-relaxed pt-2 border-t border-slate-200">
-                        {isSubjectToAppraisal ? (
-                          <span className="text-red-750 font-black flex items-start gap-2">
-                            <span className="shrink-0 text-lg">➔</span> 
-                            Hiện tại, công trình của bạn ĐẠT HOẶC VƯỢT một trong các ngưỡng pháp lý trên, do đó chủ đầu tư bắt buộc phải chuẩn bị đầy đủ hồ sơ thiết kế kỹ thuật PCCC để đệ trình cơ quan Cảnh sát PCCC chuyên môn phê duyệt trước khi thi công lắp đặt và khai thác.
-                          </span>
-                        ) : (
-                          <span className="text-emerald-800 font-black flex items-start gap-2">
-                            <span className="shrink-0 text-lg">➔</span> 
-                            Công trình của bạn nằm dưới cả hai ngưỡng quy phạm trên nên không cần nộp hồ sơ thẩm duyệt cho công an quận huyện hay thành phố. Tuy nhiên, căn cứ Điều 20 Nghị định khẳng định chủ đầu tư vẫn hoàn toàn tự chịu trách nhiệm pháp lý thiết kế, xây dựng đạt đầy đủ quy phạm QCVN 06:2022/BXD và QCVN 10:2025/BCA. Hồ sơ PCCC phải lập để Ủy ban Nhân dân và Công an xã/phường kiểm tra định kỳ định khoản 3 năm một lần.
-                          </span>
-                        )}
-                      </p>
-                    </div>
+                    {/* Căn cứ pháp lý do BACKEND dựng — dùng chung nguồn với banner ở trên */}
+                    <LegalBasisPanel basis={appraisalBasis} isSubjectToAppraisal={isSubjectToAppraisal} variant="full" />
                   </div>
 
                   {/* Right area: Pie chart and statistics */}
@@ -1957,7 +1891,7 @@ export function MainArea({
                       <div className="flex items-center justify-between border-b border-slate-200 pb-3 flex-wrap gap-2">
                         <div className="text-left">
                           <h4 className="font-display font-black text-slate-900 text-sm uppercase tracking-tight">
-                            Phân bố 17 Hạng mục rà soát
+                            Phân bố các mục rà soát
                           </h4>
                           <p className="text-[11px] text-slate-400 mt-0.5">
                             Tỷ lệ trạng thái an toàn quy chuẩn

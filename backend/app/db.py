@@ -12,7 +12,7 @@ from app.config import DATABASE_URL
 
 connect_args = {"timeout": 10, "command_timeout": 90}
 if DATABASE_URL.startswith("postgresql+asyncpg://"):
-    connect_args["ssl"] = True
+    connect_args["ssl"] = False
 
 _options = {
     "connect_args": connect_args,

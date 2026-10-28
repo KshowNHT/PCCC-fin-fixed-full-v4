@@ -12,7 +12,18 @@ import os
 import sys
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover
+    load_dotenv = None
+
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Tự động nạp biến môi trường từ backend/.env (ưu tiên) và ../.env (gốc dự án).
+# override=False để các biến truyền trực tiếp từ Docker Compose hoặc bộ test luôn được ưu tiên.
+if load_dotenv is not None:
+    load_dotenv(BASE_DIR / ".env", override=False)
+    load_dotenv(BASE_DIR.parent / ".env", override=False)
 
 DATA_DIR = Path(os.environ.get("PCCC_DATA_DIR", str(BASE_DIR / "data")))
 UPLOADS_DIR = DATA_DIR / "uploads"
@@ -42,7 +53,17 @@ elif DATABASE_URL.startswith("postgresql://") and not DATABASE_URL.startswith("p
 _INSECURE_JWT_DEFAULT = "CHANGE_ME_IN_PRODUCTION_pccc_secret_key"
 JWT_SECRET = os.environ.get("JWT_SECRET", _INSECURE_JWT_DEFAULT)
 JWT_ALGORITHM = "HS256"
-JWT_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "480"))  # 8 giờ ca làm việc
+# Tuổi thọ mỗi Access Token ngắn (mặc định 30 phút) để giảm thiểu rủi ro nếu token bị đánh cắp;
+# người dùng đang hoạt động sẽ được tự động cấp token mới qua /api/auth/refresh.
+JWT_EXPIRE_MINUTES = int(os.environ.get("JWT_EXPIRE_MINUTES", "30"))
+# Khoảng thời gian trước khi hết hạn (giây) mà client chủ động xin cấp mới token (mặc định 10 phút)
+JWT_REFRESH_WINDOW_SECONDS = int(os.environ.get("JWT_REFRESH_WINDOW_SECONDS", "600"))
+# Ân hạn (giây) cho phép refresh khi người dùng chuyển sang tab khác bị trình duyệt đóng băng timer
+# rồi vừa quay lại tab hệ thống ngay sau khi token vừa hết hạn (mặc định 300 giây = 5 phút)
+JWT_REFRESH_GRACE_SECONDS = int(os.environ.get("JWT_REFRESH_GRACE_SECONDS", "300"))
+# Tuổi thọ tối đa tuyệt đối của 1 phiên đăng nhập tính từ lúc login gốc (mặc định 720 phút = 12 giờ),
+# chặn kẻ tấn công tự động refresh token vô thời hạn.
+JWT_ABSOLUTE_SESSION_MINUTES = int(os.environ.get("JWT_ABSOLUTE_SESSION_MINUTES", "720"))
 
 MIN_PASSWORD_LENGTH = 10  # NIST 800-63B khuyến nghị >=8; nâng lên 10 cho an toàn hơn
 

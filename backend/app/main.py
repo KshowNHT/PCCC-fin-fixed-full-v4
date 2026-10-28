@@ -49,15 +49,19 @@ from pydantic import BaseModel, Field
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.auth import (
+    compute_password_fingerprint,
     create_access_token,
+    decode_access_token,
     get_current_user,
     hash_password,
+    oauth2_scheme,
     require_admin,
+    revoke_token_payload,
     verify_password,
 )
 from app.checklist_data import STANDARDS_CHECKLIST_TEMPLATE
@@ -67,6 +71,8 @@ from app.config import (
     ALLOWED_ORIGINS,
     DRAWINGS_DIR,
     FRONTEND_DIST_DIR,
+    JWT_EXPIRE_MINUTES,
+    JWT_REFRESH_GRACE_SECONDS,
     LEGAL_DB_DIR,
     MAX_CHAT_MESSAGE_LENGTH,
     MAX_STAFF_ACCOUNTS,
@@ -86,6 +92,7 @@ from app.pdf_report import generate_compliance_report_pdf, generate_document_pdf
 from app.ai_guard import guard_reply, guard_warnings, sanitize_extracted_info
 from app.rules_engine import DETERMINISTIC_WARNING_PREFIXES, evaluate_appraisal
 from app.schemas_auth import (
+    AdminUpdateUserRequest,
     ChangePasswordRequest,
     ChatRequest,
     LoginRequest,
@@ -322,6 +329,61 @@ async def list_users(db: AsyncSession = Depends(get_db), admin: User = Depends(r
     return list(result.scalars().all())
 
 
+@app.put("/api/auth/users/{user_id}", response_model=UserOut)
+async def update_user_by_admin(
+    user_id: str,
+    body: AdminUpdateUserRequest,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Admin cập nhật thông tin, khoá/mở khoá hoặc đặt lại mật khẩu cho nhân viên."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
+    if user.id == admin.id and body.is_active is False:
+        raise HTTPException(status_code=400, detail="Không thể tự khoá tài khoản quản trị đang đăng nhập.")
+
+    if body.full_name is not None:
+        user.full_name = body.full_name.strip()
+    if body.email is not None:
+        user.email = body.email.strip() or None
+    if body.is_active is not None:
+        user.is_active = body.is_active
+    if body.new_password:
+        user.hashed_password = hash_password(body.new_password)
+
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Email đã được sử dụng bởi tài khoản khác.")
+    await db.refresh(user)
+    return user
+
+
+@app.delete("/api/auth/users/{user_id}")
+async def delete_user_by_admin(
+    user_id: str,
+    db: AsyncSession = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """Admin xoá tài khoản nhân viên (giải phóng suất trong giới hạn 10 tài khoản)."""
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài khoản.")
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Không thể tự xoá tài khoản quản trị đang đăng nhập.")
+
+    await db.execute(update(Document).where(Document.uploaded_by == user.id).values(uploaded_by=None))
+    await db.execute(delete(InspectionLog).where(InspectionLog.owner_id == user.id))
+    await db.delete(user)
+    await db.commit()
+    return {"success": True, "message": "Đã xoá tài khoản thành công."}
+
+
+
 @app.post("/api/auth/login", response_model=TokenResponse)
 @limiter.limit("10/minute")  # SECURITY FIX: chống brute-force dò mật khẩu (trước đây không giới hạn)
 async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
@@ -332,9 +394,12 @@ async def login(request: Request, form: OAuth2PasswordRequestForm = Depends(), d
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản đã bị khoá.")
 
+    ttl_seconds = JWT_EXPIRE_MINUTES * 60
     token = create_access_token(user.id, user.username, user.role, user.hashed_password)
     return TokenResponse(
         access_token=token,
+        expires_in=ttl_seconds,
+        expires_at=int(time.time()) + ttl_seconds,
         user={"id": user.id, "username": user.username, "fullName": user.full_name, "role": user.role},
     )
 
@@ -350,11 +415,77 @@ async def login_json(request: Request, body: LoginRequest, db: AsyncSession = De
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tài khoản đã bị khoá.")
 
+    ttl_seconds = JWT_EXPIRE_MINUTES * 60
     token = create_access_token(user.id, user.username, user.role, user.hashed_password)
     return TokenResponse(
         access_token=token,
+        expires_in=ttl_seconds,
+        expires_at=int(time.time()) + ttl_seconds,
         user={"id": user.id, "username": user.username, "fullName": user.full_name, "role": user.role},
     )
+
+
+@app.post("/api/auth/refresh", response_model=TokenResponse)
+@limiter.limit("30/minute")
+async def refresh_token(
+    request: Request,
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tự động gia hạn (Sliding Refresh) cấp Access Token mới cho người dùng đang hoạt động.
+    - Hỗ trợ ân hạn JWT_REFRESH_GRACE_SECONDS (5 phút) để cứu phiên khi người dùng chuyển sang
+      tab trình duyệt khác (timer bị đóng băng) rồi vừa quay lại tab hệ thống.
+    - Giữ nguyên mã phiên gốc (sid) và thời điểm đăng nhập gốc (siat) để không vượt quá
+      tuổi thọ phiên tối đa JWT_ABSOLUTE_SESSION_MINUTES.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Chưa đăng nhập. Vui lòng cung cấp token xác thực.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(token, allow_grace_seconds=JWT_REFRESH_GRACE_SECONDS)
+    user_id = payload.get("sub")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tài khoản không tồn tại hoặc đã bị khoá.",
+        )
+    if payload.get("pwd") != compute_password_fingerprint(user.hashed_password, user.role):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Phiên đăng nhập đã bị thu hồi. Vui lòng đăng nhập lại.",
+        )
+
+    ttl_seconds = JWT_EXPIRE_MINUTES * 60
+    new_token = create_access_token(
+        user.id,
+        user.username,
+        user.role,
+        user.hashed_password,
+        session_id=payload.get("sid"),
+        session_iat=payload.get("siat") or payload.get("iat"),
+    )
+    return TokenResponse(
+        access_token=new_token,
+        expires_in=ttl_seconds,
+        expires_at=int(time.time()) + ttl_seconds,
+        user={"id": user.id, "username": user.username, "fullName": user.full_name, "role": user.role},
+    )
+
+
+@app.post("/api/auth/logout")
+async def logout_endpoint(token: Optional[str] = Depends(oauth2_scheme)):
+    """Thu hồi ngay lập tức token và phiên đăng nhập hiện tại trên máy chủ khi đăng xuất."""
+    if token:
+        try:
+            payload = decode_access_token(token, allow_grace_seconds=JWT_REFRESH_GRACE_SECONDS)
+            revoke_token_payload(payload)
+        except HTTPException:
+            pass
+    return {"success": True, "message": "Đã đăng xuất thành công."}
 
 
 @app.get("/api/auth/me", response_model=UserOut)

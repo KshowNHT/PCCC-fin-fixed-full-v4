@@ -136,3 +136,11 @@ desktop.ini
 # Sinh tự động bởi scripts/run_all_tests.sh
 frontend/tests/fixtures.json
 frontend/tests/.ui_test_out.cjs
+
+# Local dev starter script & local agent rules/skills
+start-dev.bat
+.agents/
+AGENTS.md
+skills-lock.json
+
+

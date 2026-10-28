@@ -12,7 +12,7 @@ import unittest
 from unittest.mock import patch, AsyncMock
 import zipfile
 
-TMP = tempfile.TemporaryDirectory(prefix="pccc-qa-")
+TMP = tempfile.TemporaryDirectory(prefix="pccc-qa-", ignore_cleanup_errors=True)
 TEST_URL = os.getenv("TEST_DATABASE_URL", f"sqlite+aiosqlite:///{TMP.name}/qa.sqlite")
 if not TEST_URL.startswith("sqlite+") and not TEST_URL.endswith("/pccc_test"):
     raise RuntimeError("TEST_DATABASE_URL must target disposable database pccc_test")
@@ -482,6 +482,83 @@ class Operations40(unittest.TestCase):
         r=self.client.post("/api/report/export-pdf",headers=self.staffa,json={"sessionId":sid})
         self.assertEqual(r.status_code,200,r.text[:100])
         self.assertIn("Không tìm thấy quy định phù hợp"," ".join(page.extract_text() for page in PdfReader(io.BytesIO(r.content)).pages))
+
+    def test_S30_token_expiration_and_sliding_refresh_with_tab_grace(self):
+        from app.auth import create_access_token, decode_access_token
+        import time as _time
+        login_res = self.client.post("/api/auth/login-json", json={"username": "staffa", "password": "StaffTest12345"})
+        self.assertEqual(login_res.status_code, 200)
+        tok1 = login_res.json()["access_token"]
+        p1 = decode_access_token(tok1)
+        self.assertIn("jti", p1)
+        self.assertIn("sid", p1)
+        self.assertIn("siat", p1)
+
+        # 1. Token vừa hết hạn 60s (mô phỏng chuyển sang tab khác bị đóng băng timer rồi quay lại trong 5 phút ân hạn):
+        # Gọi API trực tiếp bị chặn 401, nhưng gọi /api/auth/refresh được cứu phiên và cấp token mới cùng sid
+        just_expired_tok = create_access_token(
+            p1["sub"], p1["username"], p1["role"],
+            session_id=p1["sid"], session_iat=p1["siat"], expires_minutes=-1,
+        )
+        # Bù đúng password fingerprint thật từ tok1
+        import jwt as _jwt
+        from app.config import JWT_SECRET, JWT_ALGORITHM
+        raw_claims = _jwt.decode(just_expired_tok, JWT_SECRET, algorithms=[JWT_ALGORITHM], options={"verify_exp": False})
+        raw_claims["pwd"] = p1["pwd"]
+        just_expired_tok = _jwt.encode(raw_claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + just_expired_tok}).status_code, 401)
+        ref_res = self.client.post("/api/auth/refresh", headers={"Authorization": "Bearer " + just_expired_tok})
+        self.assertEqual(ref_res.status_code, 200, ref_res.text)
+        tok2 = ref_res.json()["access_token"]
+        p2 = decode_access_token(tok2)
+        self.assertEqual(p2["sid"], p1["sid"])
+        self.assertEqual(p2["siat"], p1["siat"])
+        self.assertNotEqual(p2["jti"], p1["jti"])
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok2}).status_code, 200)
+
+        # 2. Token đã quá hạn vượt khỏi cả thời gian ân hạn (ví dụ hết hạn 20 phút trước) -> chặn 401 ở cả refresh
+        long_expired_claims = dict(raw_claims, exp=int(_time.time()) - 1200)
+        long_expired_tok = _jwt.encode(long_expired_claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        self.assertEqual(self.client.post("/api/auth/refresh", headers={"Authorization": "Bearer " + long_expired_tok}).status_code, 401)
+
+        # 3. Token vượt quá tuổi thọ phiên tuyệt đối (JWT_ABSOLUTE_SESSION_MINUTES) -> chặn gia hạn vô tận
+        ancient_session_claims = dict(p2, siat=int(_time.time()) - 86400 * 2, exp=int(_time.time()) + 1800)
+        ancient_tok = _jwt.encode(ancient_session_claims, JWT_SECRET, algorithm=JWT_ALGORITHM)
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + ancient_tok}).status_code, 401)
+        self.assertEqual(self.client.post("/api/auth/refresh", headers={"Authorization": "Bearer " + ancient_tok}).status_code, 401)
+
+    def test_S31_logout_revokes_token_and_session_immediately(self):
+        login_res = self.client.post("/api/auth/login-json", json={"username": "staffa", "password": "StaffTest12345"})
+        tok1 = login_res.json()["access_token"]
+        ref_res = self.client.post("/api/auth/refresh", headers={"Authorization": "Bearer " + tok1})
+        self.assertEqual(ref_res.status_code, 200)
+        tok2 = ref_res.json()["access_token"]
+
+        # Đăng xuất bằng tok2 -> cả tok2 và tok1 (cùng phiên sid) đều bị thu hồi ngay lập tức
+        out_res = self.client.post("/api/auth/logout", headers={"Authorization": "Bearer " + tok2})
+        self.assertEqual(out_res.status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok2}).status_code, 401)
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok1}).status_code, 401)
+        self.assertEqual(self.client.post("/api/auth/refresh", headers={"Authorization": "Bearer " + tok2}).status_code, 401)
+
+    def test_S32_admin_lock_reset_and_delete_user(self):
+        r = self.client.post("/api/auth/users", headers=self.admin, json={"username": "tempstaff", "password": "TempStaff12345", "full_name": "NV Tam"})
+        self.assertEqual(r.status_code, 201, r.text)
+        uid = r.json()["id"]
+        tok = self.client.post("/api/auth/login-json", json={"username": "tempstaff", "password": "TempStaff12345"}).json()["access_token"]
+
+        # Khoá tài khoản -> token đang sống lập tức bị chặn 401
+        self.assertEqual(self.client.put(f"/api/auth/users/{uid}", headers=self.admin, json={"is_active": False}).status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok}).status_code, 401)
+
+        # Mở khoá + cấp lại mật khẩu mới -> mật khẩu mới đăng nhập thành công
+        self.assertEqual(self.client.put(f"/api/auth/users/{uid}", headers=self.admin, json={"is_active": True, "new_password": "ResetStaff12345"}).status_code, 200)
+        self.assertEqual(self.client.post("/api/auth/login-json", json={"username": "tempstaff", "password": "ResetStaff12345"}).status_code, 200)
+
+        # Xoá tài khoản -> giải phóng suất nhân viên
+        self.assertEqual(self.client.delete(f"/api/auth/users/{uid}", headers=self.admin).status_code, 200)
+        self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok}).status_code, 401)
 
 
 if __name__ == "__main__":

@@ -4,11 +4,12 @@ import { MainArea } from "./components/MainArea";
 import { Login } from "./components/Login";
 import { BlueprintUpload } from "./components/BlueprintUpload";
 import { InspectionLogPanel } from "./components/InspectionLogPanel";
+import { UserManagementModal } from "./components/UserManagementModal";
 import { ProjectInfo, DocumentItem, ChatMessage, ChecklistItem, AppraisalBasis } from "./types";
-import { apiFetch, getStoredUser, verifySession, logout, getToken, AuthUser } from "./lib/api";
+import { apiFetch, getStoredUser, verifySession, logout, getToken, isSameAuthSession, AuthUser } from "./lib/api";
 import { activateCodeProtection } from "./lib/codeProtection";
 import { DevToolsWarningOverlay } from "./components/DevToolsWarningOverlay";
-import { LogOut, ScanLine, History } from "lucide-react";
+import { LogOut, ScanLine, History, Users, KeyRound } from "lucide-react";
 
 interface Session {
   id: string;
@@ -96,9 +97,10 @@ export default function App() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
 
-  // Tính năng mới theo kế hoạch: OCR đọc bản vẽ (Ngày 12-17) + Nhật ký kiểm tra (Ngày 9-11)
+  // Tính năng mới theo kế hoạch: OCR đọc bản vẽ (Ngày 12-17) + Nhật ký kiểm tra (Ngày 9-11) + Quản lý tài khoản (Ngày 1-2)
   const [isBlueprintUploadOpen, setIsBlueprintUploadOpen] = useState(false);
   const [isInspectionLogOpen, setIsInspectionLogOpen] = useState(false);
+  const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
 
   // FIX B03 (Bao_Cao_QA_Lan_2.md): hiển thị lỗi validation từ backend (trước
   // đây bị nuốt im lặng, người dùng không biết vì sao input không được lưu).
@@ -273,7 +275,7 @@ export default function App() {
       if (e?.name === "AbortError") return;
       setValidationError("Không tạo được hồ sơ. Vui lòng thử lại.");
     } finally {
-      if (token === getToken()) { busyRef.current = false; setIsPending(false); }
+      if (isSameAuthSession(token, getToken())) { busyRef.current = false; setIsPending(false); }
     }
   };
 
@@ -298,7 +300,7 @@ export default function App() {
       if (e?.name === "AbortError") return;
       setValidationError("Không xóa được hồ sơ. Vui lòng thử lại.");
     } finally {
-      if (token === getToken()) { busyRef.current = false; setIsPending(false); }
+      if (isSameAuthSession(token, getToken())) { busyRef.current = false; setIsPending(false); }
     }
   };
 
@@ -323,7 +325,7 @@ export default function App() {
           failedFields.current.add("__sync__");
           setValidationError(e.message || "Không tải được hồ sơ mới nhất.");
         }
-      } finally { if (token === getToken()) { busyRef.current = false; setIsPending(false); } }
+      } finally { if (isSameAuthSession(token, getToken())) { busyRef.current = false; setIsPending(false); } }
     }
   };
 
@@ -342,7 +344,7 @@ export default function App() {
     busyRef.current = true;
     setIsPending(true);
     await saveQueue.current;
-    if (operationToken !== getToken()) return;
+    if (!isSameAuthSession(operationToken, getToken())) return;
     if (failedFields.current.size) {
       busyRef.current = false;
       setIsPending(false);
@@ -377,7 +379,7 @@ export default function App() {
       // FIX B04: huỷ theo yêu cầu người dùng không phải là lỗi thật, không hiện thông báo lỗi.
       if (e?.name !== "AbortError") setValidationError(e.message || "Kết nối thất bại. Vui lòng thử lại.");
     } finally {
-      if (abortControllerRef.current === controller && operationToken === getToken()) {
+      if (abortControllerRef.current === controller && isSameAuthSession(operationToken, getToken())) {
         try { await reconcileSession(activeSessionId); }
         catch (e: any) {
           if (e?.name !== "AbortError") {
@@ -401,7 +403,7 @@ export default function App() {
     setIsSaving(true);
     const next = saveQueue.current.then(async () => {
       try {
-        if (authToken !== getToken()) return;
+        if (!isSameAuthSession(authToken, getToken())) return;
         const res = await apiFetch(`/api/sessions/${sid}/project?appraise=false`, {
           method: "PUT", body: JSON.stringify(info), headers: revisionHeaders(sid),
         });
@@ -451,7 +453,7 @@ export default function App() {
     } catch (e: any) {
       if (e?.name !== "AbortError") setValidationError(e.message || "Không tải lại được hồ sơ.");
     } finally {
-      if (token === getToken()) { busyRef.current = false; setIsPending(false); }
+      if (isSameAuthSession(token, getToken())) { busyRef.current = false; setIsPending(false); }
     }
   };
 
@@ -462,7 +464,7 @@ export default function App() {
     busyRef.current = true;
     setIsPending(true);
     await saveQueue.current;
-    if (operationToken !== getToken()) return;
+    if (!isSameAuthSession(operationToken, getToken())) return;
     if (failedFields.current.size) {
       busyRef.current = false;
       setIsPending(false);
@@ -507,7 +509,7 @@ export default function App() {
     } catch (e: any) {
       if (e?.name !== "AbortError") setValidationError(e.message || "Chưa hoàn thành rà soát. Vui lòng thử lại.");
     } finally {
-      if (abortControllerRef.current === controller && operationToken === getToken()) {
+      if (abortControllerRef.current === controller && isSameAuthSession(operationToken, getToken())) {
         try { await reconcileSession(activeSessionId); }
         catch (e: any) {
           if (e?.name !== "AbortError") {
@@ -585,7 +587,7 @@ export default function App() {
     busyRef.current = true;
     setIsPending(true);
     await saveQueue.current;
-    if (operationToken !== getToken()) return;
+    if (!isSameAuthSession(operationToken, getToken())) return;
     if (failedFields.current.size || localDraft.current) {
       busyRef.current = false;
       setIsPending(false);
@@ -607,7 +609,7 @@ export default function App() {
       console.error(e);
       alert("Không thể tải file báo cáo thẩm định: " + e.message);
     } finally {
-      if (operationToken === getToken()) {
+      if (isSameAuthSession(operationToken, getToken())) {
         busyRef.current = false;
         setIsPending(false);
         setIsExporting(false);
@@ -621,7 +623,7 @@ export default function App() {
     busyRef.current = true;
     setIsPending(true);
     await saveQueue.current;
-    if (operationToken !== getToken()) return;
+    if (!isSameAuthSession(operationToken, getToken())) return;
     if (failedFields.current.size || localDraft.current) {
       busyRef.current = false;
       setIsPending(false);
@@ -643,7 +645,7 @@ export default function App() {
       console.error(e);
       alert("Không thể tải file báo cáo PDF: " + e.message);
     } finally {
-      if (operationToken === getToken()) {
+      if (isSameAuthSession(operationToken, getToken())) {
         busyRef.current = false;
         setIsPending(false);
         setIsExportingPdf(false);
@@ -658,7 +660,7 @@ export default function App() {
     busyRef.current = true;
     setIsPending(true);
     await saveQueue.current;
-    if (operationToken !== getToken()) return;
+    if (!isSameAuthSession(operationToken, getToken())) return;
     if (failedFields.current.size || localDraft.current) {
       busyRef.current = false;
       setIsPending(false);
@@ -680,7 +682,7 @@ export default function App() {
       console.error(e);
       alert("Không thể tải file báo cáo JSON: " + e.message);
     } finally {
-      if (operationToken === getToken()) {
+      if (isSameAuthSession(operationToken, getToken())) {
         busyRef.current = false;
         setIsPending(false);
         setIsExportingJson(false);
@@ -701,6 +703,7 @@ export default function App() {
     setIsPending(false);
     setIsBlueprintUploadOpen(false);
     setIsInspectionLogOpen(false);
+    setIsUserManagementOpen(false);
     setCurrentUser(null);
     setDocuments([]);
     setChecklist([]);
@@ -747,6 +750,23 @@ export default function App() {
         <button disabled={isPending || isSaving || !activeSessionId} onClick={handleReloadActiveSession}
           title="Đọc lại dữ liệu máy chủ, bỏ các chỉnh sửa chưa lưu" className="px-2 py-1 text-slate-600">Tải lại hồ sơ</button>
         <span className="mx-1 h-4 w-px bg-slate-200" />
+        <button
+          onClick={() => setIsUserManagementOpen(true)}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-slate-600 hover:bg-slate-100 transition-colors"
+          title={currentUser.role === "admin" ? "Quản lý và cấp tài khoản nhân viên (tối đa 10 tài khoản)" : "Đổi mật khẩu tài khoản cá nhân"}
+        >
+          {currentUser.role === "admin" ? (
+            <>
+              <Users className="w-4 h-4 text-blue-600" />
+              <span className="hidden sm:inline font-medium text-blue-600">Quản lý tài khoản</span>
+            </>
+          ) : (
+            <>
+              <KeyRound className="w-4 h-4" />
+              <span className="hidden sm:inline">Đổi mật khẩu</span>
+            </>
+          )}
+        </button>
         <span className="text-slate-500">
           {currentUser.fullName || currentUser.username}
           <span className="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-slate-100 text-slate-500">{currentUser.role === "admin" ? "Quản trị" : "Nhân viên"}</span>
@@ -827,6 +847,14 @@ export default function App() {
 
       {isInspectionLogOpen && (
         <InspectionLogPanel key={activeSessionId} sessionId={activeSessionId} onClose={() => setIsInspectionLogOpen(false)} />
+      )}
+
+      {isUserManagementOpen && (
+        <UserManagementModal
+          currentUser={currentUser}
+          onClose={() => setIsUserManagementOpen(false)}
+          onPasswordChanged={handleLogout}
+        />
       )}
     </div>
   );

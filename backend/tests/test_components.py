@@ -173,12 +173,13 @@ class ComponentTests(unittest.TestCase):
 
     def test_M17_long_pdf_rejected_no_page_silently_skipped(self):
         import tempfile
-        with tempfile.NamedTemporaryFile(suffix='.pdf') as f:
-            c=canvas.Canvas(f.name)
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            pdf_path = str(Path(tmp) / 'long.pdf')
+            c=canvas.Canvas(pdf_path)
             for i in range(25):c.drawString(50,50,str(i));c.showPage()
             c.save()
             with patch('pdf2image.convert_from_path',side_effect=AssertionError('must reject before conversion')):
-                with self.assertRaisesRegex(OCRInputError,'25 trang'):_pdf_to_images(f.name)
+                with self.assertRaisesRegex(OCRInputError,'25 trang'):_pdf_to_images(pdf_path)
 
     def test_M18_summary_duplicate_and_invalid_classes_rejected(self):
         for components in ([house('Nhà có quy mô lớn nhất','Nhà kho')],[house('Kho','Nhà kho'),house('Kho','Nhà kho')],[house('X','Nhà xưởng',grade='F5.2')]):

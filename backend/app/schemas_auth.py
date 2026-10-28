@@ -48,6 +48,23 @@ class ChangePasswordRequest(BaseModel):
     _validate_new_password = field_validator("new_password")(_validate_password_strength)
 
 
+class AdminUpdateUserRequest(BaseModel):
+    """Cho phép Admin cập nhật họ tên, email, trạng thái hoạt động (khoá/mở khoá)
+    hoặc đặt lại mật khẩu cho tài khoản nhân viên."""
+    full_name: Optional[str] = Field(default=None, max_length=255)
+    email: Optional[str] = Field(default=None, max_length=255)
+    is_active: Optional[bool] = None
+    new_password: Optional[str] = Field(default=None, min_length=MIN_PASSWORD_LENGTH, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_optional_password(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or v == "":
+            return None
+        return _validate_password_strength(v)
+
+
+
 class ChatRequest(BaseModel):
     """Mới bổ sung (security audit): endpoint /api/chat trước đây nhận
     `dict` thô không giới hạn độ dài messageText — cho phép gửi payload
@@ -66,6 +83,8 @@ class ChatRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    expires_in: int = 1800
+    expires_at: Optional[int] = None
     user: dict
 
 

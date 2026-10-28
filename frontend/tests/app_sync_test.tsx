@@ -104,5 +104,34 @@ async function run() {
   localStorage.setItem('pccc_token','body-new');bodyPending.resolve();
   assert.equal((await bodyRead).name,'AbortError');
   console.log('PASS S23: login changes while body streams discard old account data');
+
+  // Test S24: Silent refresh & tab-switching recovery for real JWT tokens
+  const makeJwt = (payload: any) => {
+    const enc = (obj: any) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    return `${enc({alg:'HS256',typ:'JWT'})}.${enc(payload)}.sig`;
+  };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const expiringJwt = makeJwt({ sub: 'u', username: 'qa', role: 'admin', sid: 'sess-same', siat: nowSec - 600, exp: nowSec + 120 });
+  const refreshedJwt = makeJwt({ sub: 'u', username: 'qa', role: 'admin', sid: 'sess-same', siat: nowSec - 600, exp: nowSec + 1800 });
+  localStorage.setItem('pccc_token', expiringJwt);
+  localStorage.setItem('pccc_user', JSON.stringify(user));
+  let refreshCalled = 0;
+  g.fetch = async (path: string, options: any = {}) => {
+    if (path === '/api/auth/refresh') {
+      refreshCalled++;
+      return response({ access_token: refreshedJwt, expires_in: 1800, user });
+    }
+    if (path === '/api/documents') {
+      assert.equal(options.headers.get('Authorization'), `Bearer ${refreshedJwt}`);
+      return response([{ id: 'doc1' }]);
+    }
+    throw new Error('Unexpected route ' + path);
+  };
+  const docRes = await apiFetch('/api/documents');
+  const docs = await docRes.json();
+  assert.equal(refreshCalled, 1);
+  assert.equal(localStorage.getItem('pccc_token'), refreshedJwt);
+  assert.equal(docs.length, 1);
+  console.log('PASS S24: silent refresh renews expiring JWT without aborting active session or losing token on tab switch');
 }
 run().then(()=>{window.close();process.exit(0);}).catch(e=>{console.error(e);process.exit(1);});

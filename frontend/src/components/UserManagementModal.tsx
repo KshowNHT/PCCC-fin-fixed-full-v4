@@ -86,8 +86,9 @@ export function UserManagementModal({
       }
       const data = await res.json();
       setUsers(Array.isArray(data) ? data : []);
-    } catch (e: any) {
-      setError(e.message || "Lỗi kết nối máy chủ.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Lỗi kết nối máy chủ.";
+      setError(msg);
     } finally {
       setIsLoading(false);
     }
@@ -123,7 +124,7 @@ export function UserManagementModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = Array.isArray(data.detail)
-          ? data.detail.map((d: any) => d.msg).join("; ")
+          ? data.detail.map((d: { msg?: string }) => d.msg || "").join("; ")
           : data.detail;
         throw new Error(detail || "Không thể tạo tài khoản.");
       }
@@ -134,8 +135,9 @@ export function UserManagementModal({
       setPassword("");
       setRole("staff");
       await fetchUsers();
-    } catch (e: any) {
-      setError(e.message || "Không thể tạo tài khoản.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Không thể tạo tài khoản.";
+      setError(msg);
     } finally {
       setIsCreating(false);
     }
@@ -156,8 +158,9 @@ export function UserManagementModal({
         `Đã ${data.is_active ? "mở khoá" : "khoá"} tài khoản "${u.username}".`
       );
       await fetchUsers();
-    } catch (e: any) {
-      setError(e.message || "Lỗi cập nhật tài khoản.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Lỗi cập nhật tài khoản.";
+      setError(msg);
     } finally {
       setIsActionLoading(null);
     }
@@ -176,15 +179,16 @@ export function UserManagementModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = Array.isArray(data.detail)
-          ? data.detail.map((d: any) => d.msg).join("; ")
+          ? data.detail.map((d: { msg?: string }) => d.msg || "").join("; ")
           : data.detail;
         throw new Error(detail || "Không thể đặt lại mật khẩu.");
       }
       setSuccessMsg(`Đã cấp mật khẩu mới cho tài khoản "${targetUsername}".`);
       setResetTargetId(null);
       setResetNewPassword("");
-    } catch (e: any) {
-      setError(e.message || "Không thể đặt lại mật khẩu.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Không thể đặt lại mật khẩu.";
+      setError(msg);
     } finally {
       setIsActionLoading(null);
     }
@@ -209,8 +213,9 @@ export function UserManagementModal({
       if (!res.ok) throw new Error(data.detail || "Không thể xoá tài khoản.");
       setSuccessMsg(`Đã xoá tài khoản "${u.username}".`);
       await fetchUsers();
-    } catch (e: any) {
-      setError(e.message || "Lỗi khi xoá tài khoản.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Lỗi khi xoá tài khoản.";
+      setError(msg);
     } finally {
       setIsActionLoading(null);
     }
@@ -232,7 +237,7 @@ export function UserManagementModal({
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
         const detail = Array.isArray(data.detail)
-          ? data.detail.map((d: any) => d.msg).join("; ")
+          ? data.detail.map((d: { msg?: string }) => d.msg || "").join("; ")
           : data.detail;
         throw new Error(detail || "Không thể đổi mật khẩu.");
       }
@@ -242,8 +247,9 @@ export function UserManagementModal({
       if (onPasswordChanged) {
         setTimeout(() => onPasswordChanged(), 1200);
       }
-    } catch (e: any) {
-      setError(e.message || "Không thể đổi mật khẩu.");
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : "Không thể đổi mật khẩu.";
+      setError(msg);
     } finally {
       setIsChangingMyPwd(false);
     }

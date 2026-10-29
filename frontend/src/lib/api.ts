@@ -236,8 +236,8 @@ export function initAuthLifecycle(): void {
       void refreshAccessToken(token);
     }
   }, 60_000);
-  if (typeof (timer as any)?.unref === "function") {
-    (timer as any).unref();
+  if (typeof (timer as { unref?: () => void })?.unref === "function") {
+    (timer as { unref: () => void }).unref();
   }
 }
 
@@ -313,7 +313,7 @@ export async function apiFetch(path: string, options: RequestInit = {}): Promise
   // Kiểm tra phiên trong lúc đang đọc stream body
   for (const method of ["json", "blob", "text", "arrayBuffer"] as const) {
     const original = res[method].bind(res);
-    (res as any)[method] = async () => {
+    (res as unknown as Record<string, () => Promise<unknown>>)[method] = async () => {
       const body = await original();
       if (token !== getToken() && !isSameAuthSession(token, getToken())) {
         throw new DOMException("Phiên đăng nhập đã thay đổi.", "AbortError");

@@ -23,8 +23,9 @@ export function Login({ onLogin }: LoginProps) {
     try {
       const user = await login(username, password);
       onLogin(user);
-    } catch (err: any) {
-      setError(err.message || 'Tài khoản hoặc mật khẩu không chính xác.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Tài khoản hoặc mật khẩu không chính xác.';
+      setError(msg);
     } finally {
       setIsSubmitting(false);
     }

@@ -50,8 +50,11 @@ export function InspectionLogPanel({ sessionId, onClose }: InspectionLogPanelPro
         if (controller.signal.aborted) return;
         if (!Array.isArray(data)) throw new Error('Dữ liệu nhật ký không hợp lệ.');
         setLogs(data);
-      } catch (e: any) {
-        if (!controller.signal.aborted) setError(e.message || 'Không tải được nhật ký.');
+      } catch (e: unknown) {
+        if (!controller.signal.aborted) {
+          const msg = e instanceof Error ? e.message : 'Không tải được nhật ký.';
+          setError(msg);
+        }
       } finally {
         if (!controller.signal.aborted) setIsLoading(false);
       }

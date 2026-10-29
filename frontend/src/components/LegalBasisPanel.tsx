@@ -17,20 +17,17 @@ export function resolveStatus(basis: AppraisalBasis | null | undefined, isSubjec
 
 export const VERDICT_STYLES: Record<AppraisalStatus, { container: string; icon: string; conclusion: string }> = {
   required: {
-    container:
-      "bg-gradient-to-b from-orange-50 to-orange-100 border-orange-355 text-orange-950 shadow-[0_5px_0_0_#EA580C,0_8px_20px_rgba(234,88,12,0.15)]",
+    container: "bg-gradient-to-b from-orange-50 to-orange-100 border-orange-355 text-orange-950 shadow-[0_5px_0_0_#EA580C,0_8px_20px_rgba(234,88,12,0.15)]",
     icon: "from-orange-500 to-orange-700 shadow-[0_4px_0_0_#9A3412,0_4px_10px_rgba(0,0,0,0.18)]",
     conclusion: "text-red-750",
   },
   not_required: {
-    container:
-      "bg-gradient-to-b from-emerald-50 to-emerald-100 border-emerald-355 text-emerald-950 shadow-[0_5px_0_0_#059669,0_8px_20px_rgba(5,150,105,0.15)]",
+    container: "bg-gradient-to-b from-emerald-50 to-emerald-100 border-emerald-355 text-emerald-950 shadow-[0_5px_0_0_#059669,0_8px_20px_rgba(5,150,105,0.15)]",
     icon: "from-emerald-500 to-emerald-700 shadow-[0_4px_0_0_#047857,0_4px_10px_rgba(0,0,0,0.18)]",
     conclusion: "text-emerald-800",
   },
   insufficient_data: {
-    container:
-      "bg-gradient-to-b from-amber-50 to-amber-100 border-amber-300 text-amber-950 shadow-[0_5px_0_0_#B45309,0_8px_20px_rgba(180,83,9,0.15)]",
+    container: "bg-gradient-to-b from-amber-50 to-amber-100 border-amber-300 text-amber-950 shadow-[0_5px_0_0_#B45309,0_8px_20px_rgba(180,83,9,0.15)]",
     icon: "from-amber-500 to-amber-700 shadow-[0_4px_0_0_#78350F,0_4px_10px_rgba(0,0,0,0.18)]",
     conclusion: "text-amber-800",
   },

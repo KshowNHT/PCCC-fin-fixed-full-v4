@@ -29,8 +29,8 @@ export const FloorFunctionsSubform: React.FC<FloorFunctionsSubformProps> = ({
   if (floorsCount <= 1) return null;
 
   return (
-    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2">
-      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+    <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-xl p-3 space-y-2">
+      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
         <Layers className="w-3.5 h-3.5 text-brand-orange" />
         <span>Công năng chi tiết {floorsCount} tầng nổi</span>
       </div>
@@ -41,11 +41,11 @@ export const FloorFunctionsSubform: React.FC<FloorFunctionsSubformProps> = ({
           const currentVal = floorFunctions[idx] || "";
           return (
             <div key={`floor-${floorNum}`} className="flex items-center gap-2 text-xs">
-              <span className="w-14 shrink-0 font-medium text-slate-600">Tầng {floorNum}:</span>
+              <span className="w-14 shrink-0 font-medium text-slate-600 dark:text-slate-400">Tầng {floorNum}:</span>
               <select
                 value={currentVal}
                 onChange={(e) => onChangeFloorFunction(idx, e.target.value)}
-                className="flex-1 px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-brand-orange text-slate-800"
+                className="flex-1 px-2.5 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg text-xs outline-none focus:border-brand-orange text-slate-800 dark:text-slate-200"
               >
                 {FLOOR_FUNCTION_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>

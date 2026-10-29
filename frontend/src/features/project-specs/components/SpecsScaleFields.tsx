@@ -35,7 +35,7 @@ interface ScaleInputProps {
 
 const ScaleInput: React.FC<ScaleInputProps> = ({ id, label, value, placeholder, max, step, onChange, onBlur }) => (
   <div>
-    <label className="block text-[11px] font-bold text-slate-600 mb-1">{label}</label>
+    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">{label}</label>
     <input
       id={id}
       type="number"
@@ -47,7 +47,7 @@ const ScaleInput: React.FC<ScaleInputProps> = ({ id, label, value, placeholder, 
       onChange={(e) => onChange(e.target.value === "" ? "" : Math.min(max, Math.max(0, Number(e.target.value))))}
       onBlur={onBlur}
       placeholder={placeholder}
-      className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-brand-orange outline-none font-medium text-slate-900"
+      className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:border-brand-orange outline-none font-medium text-slate-900 dark:text-slate-100"
     />
   </div>
 );
@@ -60,7 +60,7 @@ export const SpecsScaleFields: React.FC<SpecsScaleFieldsProps> = ({
 }) => {
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700">
+      <div className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300">
         <Ruler className="w-4 h-4 text-brand-orange" />
         <span>Quy mô kiến trúc &amp; PCCC</span>
       </div>
@@ -71,12 +71,12 @@ export const SpecsScaleFields: React.FC<SpecsScaleFieldsProps> = ({
         <ScaleInput id="spec-pccc-height" label="Chiều cao PCCC (m)" value={localPcccHeight} placeholder="12" max={1000} step="0.1" onChange={setLocalPcccHeight} onBlur={() => onCommitField("pcccHeight", Number(localPcccHeight) || 0)} />
 
         <div>
-          <label className="block text-[11px] font-bold text-slate-600 mb-1">Bậc chịu lửa</label>
+          <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Bậc chịu lửa</label>
           <select
             id="spec-fire-rating"
             value={localFireRating}
             onChange={(e) => { setLocalFireRating(e.target.value); onCommitField("fireRating", e.target.value); }}
-            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-brand-orange outline-none font-medium text-slate-900"
+            className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:border-brand-orange outline-none font-medium text-slate-900 dark:text-slate-100"
           >
             <option value="">Chưa lựa chọn</option>
             {FIRE_RATINGS.map((r) => (<option key={r} value={r}>{r}</option>))}
@@ -88,7 +88,7 @@ export const SpecsScaleFields: React.FC<SpecsScaleFieldsProps> = ({
       </div>
 
       <div>
-        <label className="block text-[11px] font-bold text-slate-600 mb-1">Chi tiết kinh doanh / công năng bổ trợ</label>
+        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Chi tiết kinh doanh / công năng bổ trợ</label>
         <input
           id="spec-comm-details"
           type="text"
@@ -97,7 +97,7 @@ export const SpecsScaleFields: React.FC<SpecsScaleFieldsProps> = ({
           onChange={(e) => setLocalCommDetails(e.target.value)}
           onBlur={() => onCommitField("commercialDetails", localCommDetails)}
           placeholder="Ví dụ: Tầng 1 văn phòng, tầng 2-4 căn hộ"
-          className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-brand-orange outline-none font-medium text-slate-900 text-xs"
+          className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:bg-white dark:focus:bg-slate-800 focus:border-brand-orange outline-none font-medium text-slate-900 dark:text-slate-100 text-xs"
         />
       </div>
     </div>

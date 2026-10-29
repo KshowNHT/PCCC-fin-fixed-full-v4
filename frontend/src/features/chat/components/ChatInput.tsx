@@ -51,13 +51,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     <div className="w-full max-w-4xl mx-auto px-4 pb-4 pt-1">
       <form
         onSubmit={handleSubmit}
-        className="relative bg-white border border-slate-200 focus-within:border-brand-orange/60 focus-within:ring-2 focus-within:ring-brand-orange/15 rounded-2xl shadow-sm transition-all"
+        className="relative bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 focus-within:border-brand-orange/60 focus-within:ring-2 focus-within:ring-brand-orange/15 rounded-2xl shadow-sm transition-all"
       >
         <div className="flex items-end gap-2 p-2.5">
           <button
             type="button"
             onClick={onOpenOcrUpload}
-            className="p-2 text-slate-500 hover:text-brand-orange hover:bg-orange-50/60 rounded-xl transition-colors cursor-pointer shrink-0"
+            className="p-2 text-slate-500 dark:text-slate-400 hover:text-brand-orange dark:hover:text-brand-orange hover:bg-orange-50/60 dark:hover:bg-slate-800 rounded-xl transition-colors cursor-pointer shrink-0"
             title="Tải bản vẽ PDF / Ảnh để AI tự động bóc tách (OCR)"
           >
             <ScanLine className="w-5 h-5" />
@@ -70,7 +70,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onChange={handleInput}
             onKeyDown={handleKeyDown}
             placeholder="Hỏi về quy chuẩn PCCC, quy mô công trình, hoặc yêu cầu thẩm duyệt..."
-            className="flex-1 max-h-40 py-1.5 px-2 bg-transparent text-slate-900 placeholder:text-slate-400 text-sm outline-none resize-none font-sans leading-relaxed custom-scrollbar"
+            className="flex-1 max-h-40 py-1.5 px-2 bg-transparent text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm outline-none resize-none font-sans leading-relaxed custom-scrollbar"
           />
 
           {isPending ? (
@@ -86,7 +86,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             <button
               type="submit"
               disabled={!text.trim()}
-              className="p-2 rounded-xl bg-brand-orange hover:bg-orange-600 disabled:bg-slate-200 text-white transition-all cursor-pointer disabled:cursor-not-allowed shrink-0 shadow-xs"
+              className="p-2 rounded-xl bg-brand-orange hover:bg-orange-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white transition-all cursor-pointer disabled:cursor-not-allowed shrink-0 shadow-xs"
               title="Gửi câu hỏi"
             >
               <ArrowUp className="w-4 h-4 stroke-[2.5]" />
@@ -95,7 +95,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </div>
       </form>
 
-      <p className="text-[11px] text-center text-slate-400 mt-2 font-mono">
+      <p className="text-[11px] text-center text-slate-400 dark:text-slate-500 mt-2 font-mono">
         Hệ thống sàng lọc sơ bộ theo NĐ 136/2020 &amp; QCVN 06:2022. Cần kỹ sư xác nhận kết quả trước khi nghiệm thu.
       </p>
     </div>

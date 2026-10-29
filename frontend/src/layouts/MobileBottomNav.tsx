@@ -14,12 +14,12 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   checklistCount = 0,
 }) => {
   return (
-    <nav className="md:hidden bg-white/95 backdrop-blur-md border-t border-slate-200 px-3 py-1.5 flex items-center justify-around shrink-0 z-30 shadow-lg">
+    <nav className="md:hidden bg-white/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-200 dark:border-slate-800 px-3 py-1.5 flex items-center justify-around shrink-0 z-30 shadow-lg">
       <button
         type="button"
         onClick={() => onChangeTab("chat")}
         className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-          activeTab === "chat" ? "text-brand-orange font-bold" : "text-slate-500 hover:text-slate-800"
+          activeTab === "chat" ? "text-brand-orange font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
         }`}
       >
         <MessageSquare className="w-5 h-5" />
@@ -30,7 +30,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         type="button"
         onClick={() => onChangeTab("checklist")}
         className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all relative cursor-pointer ${
-          activeTab === "checklist" ? "text-blue-600 font-bold" : "text-slate-500 hover:text-slate-800"
+          activeTab === "checklist" ? "text-blue-600 dark:text-blue-400 font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
         }`}
       >
         <div className="relative">
@@ -48,7 +48,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         type="button"
         onClick={() => onChangeTab("verdict")}
         className={`flex flex-col items-center gap-0.5 py-1 px-3 rounded-xl transition-all cursor-pointer ${
-          activeTab === "verdict" ? "text-emerald-600 font-bold" : "text-slate-500 hover:text-slate-800"
+          activeTab === "verdict" ? "text-emerald-600 dark:text-emerald-400 font-bold" : "text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200"
         }`}
       >
         <Scale className="w-5 h-5" />

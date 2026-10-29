@@ -16,10 +16,12 @@ import { useAppSessions } from "./hooks/useAppSessions";
 import { useAppDocuments } from "./hooks/useAppDocuments";
 import { useAppExport } from "./hooks/useAppExport";
 import { useProjectWarnings } from "./hooks/useProjectWarnings";
+import { useTheme } from "./hooks/useTheme";
 import { ActiveTab, EMPTY_PROJECT, ProjectInfo } from "./types";
 
 export default function App() {
   const [errorMessage, setErrorMessage] = useState("");
+  const { theme, toggleTheme } = useTheme();
   const { currentUser, authChecked, isDevToolsOpen, handleLogout } = useAppAuth();
   const sessionCtrl = useAppSessions(setErrorMessage);
   const docCtrl = useAppDocuments(setErrorMessage);
@@ -101,6 +103,8 @@ export default function App() {
             isPending={sessionCtrl.isPending}
             hasAreaContradiction={hasAreaContradiction}
             hasChecklist={!!sessionCtrl.activeSession?.checklist?.length}
+            theme={theme}
+            onToggleTheme={toggleTheme}
             onExportDocx={exportCtrl.handleExportDocx}
             onExportPdf={exportCtrl.handleExportPdf}
             onExportJson={exportCtrl.handleExportJson}

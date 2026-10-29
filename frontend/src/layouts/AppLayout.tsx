@@ -31,7 +31,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   onCloseSidebarMobile,
 }) => {
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 font-sans text-slate-900 antialiased relative">
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-100 dark:bg-slate-950 font-sans text-slate-900 dark:text-slate-100 antialiased relative">
       {sidebar}
 
       {isSidebarOpen && (
@@ -41,7 +41,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         />
       )}
 
-      <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-slate-50 relative">
+      <main className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-slate-50 dark:bg-slate-900 relative">
         {header}
         {warningBanner}
 

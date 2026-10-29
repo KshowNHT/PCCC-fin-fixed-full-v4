@@ -45,14 +45,14 @@ export const LegalBasisTabWrapper: React.FC<LegalBasisTabWrapperProps> = ({
   }, [checklist]);
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-50/50">
+    <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar bg-slate-50/50 dark:bg-slate-950/60">
       <div className="max-w-5xl mx-auto space-y-5">
         <div className={`p-6 rounded-2xl border-2 flex flex-col sm:flex-row items-start sm:items-center gap-4 transition-all shadow-md ${style.container}`}>
           <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-white shrink-0 bg-gradient-to-b ${style.icon}`}>
             <VerdictIcon status={status} className="w-8 h-8" />
           </div>
           <div className="space-y-1">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Kết luận sàng lọc pháp lý</span>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">Kết luận sàng lọc pháp lý</span>
             <h2 className="font-bold text-lg sm:text-xl uppercase tracking-tight text-slate-900 leading-tight">
               {heading}
             </h2>
@@ -71,10 +71,10 @@ export const LegalBasisTabWrapper: React.FC<LegalBasisTabWrapperProps> = ({
             />
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3 flex flex-col">
-            <div className="border-b border-slate-100 pb-2">
-              <h3 className="font-bold text-xs uppercase text-slate-800">Phân bố tiêu chí rà soát</h3>
-              <p className="text-[11px] text-slate-400">Tỷ lệ tuân thủ theo 17-38 hạng mục</p>
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3 flex flex-col">
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-2">
+              <h3 className="font-bold text-xs uppercase text-slate-800 dark:text-slate-200">Phân bố tiêu chí rà soát</h3>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Tỷ lệ tuân thủ theo 17-38 hạng mục</p>
             </div>
 
             {chartData.length > 0 ? (
@@ -94,17 +94,17 @@ export const LegalBasisTabWrapper: React.FC<LegalBasisTabWrapperProps> = ({
                 <div className="space-y-1.5 pt-1 text-xs">
                   {chartData.map((d) => (
                     <div key={d.name} className="flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-slate-600">
+                      <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-400">
                         <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: d.color }} />
                         {d.name}
                       </span>
-                      <span className="font-bold text-slate-800">{d.value}</span>
+                      <span className="font-bold text-slate-800 dark:text-slate-200">{d.value}</span>
                     </div>
                   ))}
                 </div>
               </>
             ) : (
-              <p className="text-xs text-slate-400 py-8 text-center">Chưa có dữ liệu tiêu chí.</p>
+              <p className="text-xs text-slate-400 dark:text-slate-500 py-8 text-center">Chưa có dữ liệu tiêu chí.</p>
             )}
           </div>
         </div>

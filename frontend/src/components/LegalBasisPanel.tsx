@@ -70,11 +70,9 @@ export function LegalBasisPanel({ basis, isSubjectToAppraisal, variant }: Props)
   return (
     <div
       id={`${idPrefix}-legislative-notices`}
-      className={`bg-white border-2 border-slate-350 ${full ? "rounded-2xl p-6 space-y-4 shadow-lg flex-1" : "rounded-xl p-5 space-y-3 shadow-md"}`}
+      className={`bg-white dark:bg-slate-900 border-2 border-slate-350 dark:border-slate-800 ${full ? "rounded-2xl p-6 space-y-4 shadow-lg flex-1" : "rounded-xl p-5 space-y-3 shadow-md"}`}
     >
-      <h4
-        className={`font-display font-black text-[#6B0D0D] ${full ? "text-[20px]" : "text-[18px]"} flex items-center gap-2 uppercase tracking-tight`}
-      >
+      <h4 className={`font-display font-black text-[#6B0D0D] dark:text-red-400 ${full ? "text-[20px]" : "text-[18px]"} flex items-center gap-2 uppercase tracking-tight`}>
         <div className="w-6 h-6 rounded-lg bg-gradient-to-b from-red-500 to-red-700 flex items-center justify-center text-white shrink-0">
           <Info className="w-3.5 h-3.5" />
         </div>
@@ -82,47 +80,37 @@ export function LegalBasisPanel({ basis, isSubjectToAppraisal, variant }: Props)
       </h4>
 
       {!basis ? (
-        <p className="text-xs text-black font-semibold leading-relaxed" data-testid="basis-missing">
+        <p className="text-xs text-slate-800 dark:text-slate-200 font-semibold leading-relaxed" data-testid="basis-missing">
           Chưa có dữ liệu căn cứ pháp lý chi tiết cho hồ sơ này. Vui lòng bấm “Kiểm duyệt hồ sơ” để hệ thống tính lại.
         </p>
       ) : (
         <>
           <div className="text-xs" data-testid="basis-category">
-            <span className="font-black text-black">Nhóm công năng áp dụng: </span>
+            <span className="font-black text-slate-900 dark:text-slate-100">Nhóm công năng áp dụng: </span>
             <span className="font-black text-brand-orange">{basis.categoryLabel}</span>
-            <span className="block text-slate-600 font-semibold mt-0.5">{basis.categoryEvidence}</span>
+            <span className="block text-slate-600 dark:text-slate-400 font-semibold mt-0.5">{basis.categoryEvidence}</span>
           </div>
 
-          <p className={`${full ? "text-sm" : "text-xs"} text-black font-semibold leading-relaxed`} data-testid="basis-legal-text">
+          <p className={`${full ? "text-sm" : "text-xs"} text-slate-900 dark:text-slate-100 font-semibold leading-relaxed`} data-testid="basis-legal-text">
             {basis.legalText}
           </p>
 
           {basis.ruleMode === "always" ? (
-            <div
-              className="p-4 rounded-xl border-2 border-dashed border-orange-355 bg-orange-50/50 space-y-1"
-              data-testid="basis-scale-independent"
-            >
-              <span className="text-xs font-black text-orange-950 uppercase">Không phụ thuộc quy mô</span>
-              <p className="text-black font-black text-sm">Các ngưỡng số tầng / diện tích sàn không áp dụng cho nhóm này</p>
-              <span className="text-xs text-orange-850 font-bold block">(Công trình của bạn: {basis.actualScale})</span>
+            <div className="p-4 rounded-xl border-2 border-dashed border-orange-355 dark:border-orange-800 bg-orange-50/50 dark:bg-orange-950/20 space-y-1" data-testid="basis-scale-independent">
+              <span className="text-xs font-black text-orange-950 dark:text-orange-300 uppercase">Không phụ thuộc quy mô</span>
+              <p className="text-slate-900 dark:text-slate-100 font-black text-sm">Các ngưỡng số tầng / diện tích sàn không áp dụng cho nhóm này</p>
+              <span className="text-xs text-orange-850 dark:text-orange-300 font-bold block">(Công trình của bạn: {basis.actualScale})</span>
             </div>
           ) : (
             <div className={`grid grid-cols-1 ${basis.thresholds.length > 1 ? "md:grid-cols-2" : ""} gap-4`} data-testid="basis-thresholds">
               {basis.thresholds.map((row) => {
                 const badge = STATE_BADGE[row.state];
                 return (
-                  <div
-                    key={row.key}
-                    className="p-4 rounded-xl border-2 border-dashed border-orange-355 bg-orange-50/50 space-y-1"
-                    data-testid={`threshold-${row.key}`}
-                    data-state={row.state}
-                  >
-                    <span className="text-xs font-black text-orange-950 uppercase">Ngưỡng {row.label}:</span>
-                    <p className="text-black font-black text-sm">Yêu cầu {row.limitText}</p>
-                    <span className="text-xs text-orange-850 font-bold block">(Công trình của bạn: {row.actualText})</span>
-                    <span className={`inline-block mt-1 px-2 py-0.5 rounded border text-[10px] font-black ${badge.cls}`}>
-                      {badge.text}
-                    </span>
+                  <div key={row.key} className="p-4 rounded-xl border-2 border-dashed border-orange-355 dark:border-orange-800 bg-orange-50/50 dark:bg-orange-950/20 space-y-1" data-testid={`threshold-${row.key}`} data-state={row.state}>
+                    <span className="text-xs font-black text-orange-950 dark:text-orange-300 uppercase">Ngưỡng {row.label}:</span>
+                    <p className="text-slate-900 dark:text-slate-100 font-black text-sm">Yêu cầu {row.limitText}</p>
+                    <span className="text-xs text-orange-850 dark:text-orange-300 font-bold block">(Công trình của bạn: {row.actualText})</span>
+                    <span className={`inline-block mt-1 px-2 py-0.5 rounded border text-[10px] font-black ${badge.cls}`}>{badge.text}</span>
                   </div>
                 );
               })}
@@ -130,14 +118,12 @@ export function LegalBasisPanel({ basis, isSubjectToAppraisal, variant }: Props)
           )}
 
           {basis.missingFields.length > 0 && (
-            <p className="text-xs font-black text-amber-800" data-testid="basis-missing-fields">
+            <p className="text-xs font-black text-amber-800 dark:text-amber-400" data-testid="basis-missing-fields">
               Còn thiếu thông số: {basis.missingFields.map((k) => FIELD_LABELS[k] ?? k).join(", ")}.
             </p>
           )}
 
-          <p
-            className={`${full ? "text-sm" : "text-xs"} text-black font-semibold leading-relaxed ${full ? "pt-2 border-t border-slate-200" : ""}`}
-          >
+          <p className={`${full ? "text-sm" : "text-xs"} text-slate-900 dark:text-slate-100 font-semibold leading-relaxed ${full ? "pt-2 border-t border-slate-200 dark:border-slate-800" : ""}`}>
             <span className={`${style.conclusion} font-black block`} data-testid="basis-conclusion">
               ➔ {basis.conclusion}
             </span>

@@ -44,26 +44,26 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
     <div className="fixed inset-0 z-50 overflow-hidden">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-xs transition-opacity" onClick={onClose} />
       <div className="fixed inset-y-0 right-0 max-w-full flex pl-10">
-        <aside className="w-screen max-w-md bg-white shadow-2xl flex flex-col border-l border-slate-200 animate-in slide-in-from-right duration-250">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
+        <aside className="w-screen max-w-md bg-white dark:bg-slate-900 shadow-2xl flex flex-col border-l border-slate-200 dark:border-slate-800 animate-in slide-in-from-right duration-250">
+          <div className="px-5 py-4 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-950/60">
             <div>
-              <h2 className="text-sm font-bold text-slate-800">Thông số kỹ thuật công trình</h2>
-              <p className="text-[11px] text-slate-500">Cơ sở tính toán các ngưỡng thẩm duyệt PCCC</p>
+              <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">Thông số kỹ thuật công trình</h2>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">Cơ sở tính toán các ngưỡng thẩm duyệt PCCC</p>
             </div>
-            <button type="button" onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer">
+            <button type="button" onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
               <X className="w-5 h-5" />
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
             {hasLocalDraft && (
-              <div className="flex items-center gap-2 p-2.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-xl text-xs">
-                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+              <div className="flex items-center gap-2 p-2.5 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-900/60 rounded-xl text-xs">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
                 <span>Thông số đang có chỉnh sửa mới chưa kiểm duyệt.</span>
               </div>
             )}
             {!!project.components?.length && (
-              <div className="p-2.5 bg-blue-50 text-blue-800 border border-blue-200 rounded-xl text-xs">
+              <div className="p-2.5 bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 border border-blue-200 dark:border-blue-900/60 rounded-xl text-xs">
                 Hồ sơ có {project.components.length} hạng mục độc lập. Thông số từng hạng mục được quản lý bên dưới.
               </div>
             )}
@@ -74,9 +74,9 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
             <BuildingEditor project={project} onUpdate={onUpdateProject} />
           </div>
 
-          <div className="p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between gap-2">
+          <div className="p-4 bg-slate-50 dark:bg-slate-950/70 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
             {onReloadSession && (
-              <button type="button" disabled={isPending || isSaving} onClick={onReloadSession} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-slate-600 hover:text-slate-900 border border-slate-200 rounded-xl hover:bg-white cursor-pointer" title="Hủy các sửa đổi chưa lưu và tải lại từ máy chủ">
+              <button type="button" disabled={isPending || isSaving} onClick={onReloadSession} className="inline-flex items-center gap-1.5 px-3 py-2 text-xs text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-slate-700 rounded-xl hover:bg-white dark:hover:bg-slate-800 cursor-pointer" title="Hủy các sửa đổi chưa lưu và tải lại từ máy chủ">
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Tải lại</span>
               </button>

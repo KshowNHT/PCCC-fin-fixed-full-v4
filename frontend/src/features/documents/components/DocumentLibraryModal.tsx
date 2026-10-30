@@ -260,18 +260,16 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
               <button
                 type="button"
                 onClick={() => setPreviewTab("pdf")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  previewTab === "pdf" ? "bg-brand-orange text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${previewTab === "pdf" ? "bg-brand-orange text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
               >
                 Xem trực tiếp PDF
               </button>
               <button
                 type="button"
                 onClick={() => setPreviewTab("text")}
-                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
-                  previewTab === "text" ? "bg-brand-orange text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
+                className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${previewTab === "text" ? "bg-brand-orange text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  }`}
               >
                 Nội dung trích lục (Text)
               </button>

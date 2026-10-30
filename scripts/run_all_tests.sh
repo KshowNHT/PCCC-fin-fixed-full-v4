@@ -13,7 +13,7 @@ npm ci --no-audit --no-fund
 npm run lint
 npm run build
 npm exec -- esbuild tests/ui_verdict_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom --outfile=tests/.ui_test_out.cjs --log-level=error
-trap 'rm -f tests/.ui_test_out.cjs tests/.sync_test_out.cjs tests/.component_sync_out.cjs tests/.building_out.cjs' EXIT
+trap 'rm -f tests/.ui_test_out.cjs tests/.sync_test_out.cjs tests/.component_sync_out.cjs tests/.building_out.cjs tests/.day2_test_out.cjs' EXIT
 node tests/.ui_test_out.cjs
 node tests/build_sync_test.mjs
 node tests/.sync_test_out.cjs
@@ -21,4 +21,6 @@ npm exec -- esbuild tests/component_sync_test.tsx --bundle --platform=node --for
 node tests/.component_sync_out.cjs
 npm exec -- esbuild tests/building_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom '--define:import.meta.env={}' --outfile=tests/.building_out.cjs --log-level=error
 node tests/.building_out.cjs
+npm exec -- esbuild tests/day2_document_rbac_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom '--define:import.meta.env={}' --outfile=tests/.day2_test_out.cjs --log-level=error
+node tests/.day2_test_out.cjs
 printf '%s\n' 'PASS: all local checks. Hosting/PostgreSQL/Gemini acceptance checks are documented separately.'

@@ -64,6 +64,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           </button>
 
           <textarea
+            id="chat-textarea"
             ref={textareaRef}
             rows={1}
             value={text}
@@ -76,6 +77,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           {isPending ? (
             <button
               type="button"
+              id="btn-cancel-pending"
               onClick={onCancelPending}
               className="p-2 rounded-xl bg-red-500 hover:bg-red-600 text-white transition-all cursor-pointer shrink-0 shadow-xs"
               title="Dừng tiến trình hiện tại"
@@ -85,6 +87,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           ) : (
             <button
               type="submit"
+              id="btn-send-message"
               disabled={!text.trim()}
               className="p-2 rounded-xl bg-brand-orange hover:bg-orange-600 disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 dark:disabled:text-slate-600 text-white transition-all cursor-pointer disabled:cursor-not-allowed shrink-0 shadow-xs"
               title="Gửi câu hỏi"

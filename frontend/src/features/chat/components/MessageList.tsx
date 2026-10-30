@@ -7,12 +7,14 @@ interface MessageListProps {
   messages: ChatMessage[];
   isPending: boolean;
   onOpenOcrUpload: () => void;
+  onOpenCitation?: (code: string) => void;
 }
 
 export const MessageList: React.FC<MessageListProps> = ({
   messages,
   isPending,
   onOpenOcrUpload,
+  onOpenCitation,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -78,7 +80,7 @@ export const MessageList: React.FC<MessageListProps> = ({
   return (
     <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4 custom-scrollbar">
       {messages.map((msg) => (
-        <MessageItem key={msg.id} message={msg} />
+        <MessageItem key={msg.id} message={msg} onOpenCitation={onOpenCitation} />
       ))}
 
       {isPending && (

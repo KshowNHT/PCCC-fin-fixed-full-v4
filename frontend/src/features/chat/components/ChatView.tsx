@@ -10,6 +10,7 @@ interface ChatViewProps {
   onSendMessage: (text: string) => void;
   onCancelPending?: () => void;
   onOpenOcrUpload: () => void;
+  onOpenCitation?: (code: string) => void;
 }
 
 export const ChatView: React.FC<ChatViewProps> = ({
@@ -18,6 +19,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
   onSendMessage,
   onCancelPending,
   onOpenOcrUpload,
+  onOpenCitation,
 }) => {
   return (
     <div className="flex-1 flex flex-col h-full bg-slate-50/50 dark:bg-slate-950/60 overflow-hidden relative">
@@ -25,6 +27,7 @@ export const ChatView: React.FC<ChatViewProps> = ({
         messages={messages}
         isPending={isPending}
         onOpenOcrUpload={onOpenOcrUpload}
+        onOpenCitation={onOpenCitation}
       />
 
       <QuickPrompts

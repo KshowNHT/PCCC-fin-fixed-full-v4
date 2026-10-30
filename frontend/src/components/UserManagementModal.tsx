@@ -265,18 +265,18 @@ export function UserManagementModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">
+      <div className="bg-white text-slate-900 rounded-xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200 shrink-0 bg-white">
           <div className="flex items-center gap-2.5">
             <Users className="w-5 h-5 text-blue-600" />
-            <h3 className="font-semibold text-slate-800 text-base">
+            <h3 className="font-semibold text-slate-900 text-base">
               {isAdmin ? "Quản lý tài khoản hệ thống" : "Tài khoản cá nhân"}
             </h3>
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-slate-100 text-slate-500"
+            className="p-1 rounded hover:bg-slate-100 text-slate-500 cursor-pointer"
             title="Đóng"
           >
             <X className="w-5 h-5" />
@@ -342,13 +342,13 @@ export function UserManagementModal({
         )}
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
+        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5 text-slate-900">
           {activeTab === "users" && isAdmin ? (
             <>
               {/* Thanh hạn mức 10 tài khoản nhân viên */}
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3.5 text-slate-900">
                 <div className="flex items-center justify-between text-xs mb-1.5">
-                  <span className="font-medium text-slate-700">
+                  <span className="font-bold text-slate-800">
                     Hạn mức tài khoản Nhân viên (không tính Admin)
                   </span>
                   <span
@@ -378,7 +378,7 @@ export function UserManagementModal({
                   />
                 </div>
                 {staffCount >= MAX_STAFF_LIMIT && (
-                  <p className="mt-1.5 text-xs text-red-600">
+                  <p className="mt-1.5 text-xs text-red-600 font-medium">
                     Đã đạt giới hạn tối đa {MAX_STAFF_LIMIT} tài khoản nhân viên. Nếu muốn cấp tài khoản nhân viên mới, vui lòng xoá bớt tài khoản nhân viên không còn sử dụng bên dưới.
                   </p>
                 )}
@@ -387,16 +387,16 @@ export function UserManagementModal({
               {/* Form tạo tài khoản mới */}
               <form
                 onSubmit={handleCreateUser}
-                className="bg-white border border-slate-200 rounded-lg p-4 space-y-3"
+                className="bg-white border border-slate-200 rounded-lg p-4 space-y-3 text-slate-900"
               >
-                <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
                   <UserPlus className="w-4 h-4 text-blue-600" />
                   <span>Tạo tài khoản mới</span>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
                       Tên đăng nhập <span className="text-red-500">*</span>
                     </label>
                     <input
@@ -408,15 +408,15 @@ export function UserManagementModal({
                       minLength={3}
                       maxLength={64}
                       required
-                      className="w-full text-sm border border-slate-300 rounded-md px-3 py-1.5 outline-none focus:border-blue-500"
+                      className="w-full text-sm border border-slate-300 rounded-md px-3 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 placeholder:text-slate-400 font-medium"
                     />
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px] text-slate-500">
                       3–64 ký tự, chỉ gồm chữ không dấu, số, dấu chấm, gạch dưới/ngang.
                     </span>
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
                       Họ và tên hiển thị
                     </label>
                     <input
@@ -425,12 +425,12 @@ export function UserManagementModal({
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="VD: Nguyễn Văn A"
                       maxLength={255}
-                      className="w-full text-sm border border-slate-300 rounded-md px-3 py-1.5 outline-none focus:border-blue-500"
+                      className="w-full text-sm border border-slate-300 rounded-md px-3 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 placeholder:text-slate-400 font-medium"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                    <label className="block text-xs font-bold text-slate-800 mb-1">
                       Mật khẩu khởi tạo <span className="text-red-500">*</span>
                     </label>
                     <div className="relative">
@@ -442,12 +442,12 @@ export function UserManagementModal({
                         minLength={10}
                         maxLength={128}
                         required
-                        className="w-full text-sm border border-slate-300 rounded-md pl-3 pr-9 py-1.5 outline-none focus:border-blue-500"
+                        className="w-full text-sm border border-slate-300 rounded-md pl-3 pr-9 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 placeholder:text-slate-400 font-medium"
                       />
                       <button
                         type="button"
                         onClick={() => setShowCreatePwd((v) => !v)}
-                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+                        className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
                         tabIndex={-1}
                       >
                         {showCreatePwd ? (
@@ -457,14 +457,14 @@ export function UserManagementModal({
                         )}
                       </button>
                     </div>
-                    <span className="text-[11px] text-slate-400">
+                    <span className="text-[11px] text-slate-500">
                       Bắt buộc ít nhất 10 ký tự, có cả chữ cái và chữ số.
                     </span>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
                         Email (tuỳ chọn)
                       </label>
                       <input
@@ -473,11 +473,11 @@ export function UserManagementModal({
                         onChange={(e) => setEmail(e.target.value)}
                         placeholder="nv@congty.vn"
                         maxLength={255}
-                        className="w-full text-sm border border-slate-300 rounded-md px-2.5 py-1.5 outline-none focus:border-blue-500"
+                        className="w-full text-sm border border-slate-300 rounded-md px-2.5 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 placeholder:text-slate-400 font-medium"
                       />
                     </div>
                     <div>
-                      <label className="block text-xs font-medium text-slate-700 mb-1">
+                      <label className="block text-xs font-bold text-slate-800 mb-1">
                         Vai trò
                       </label>
                       <select
@@ -485,10 +485,10 @@ export function UserManagementModal({
                         onChange={(e) =>
                           setRole(e.target.value as "staff" | "admin")
                         }
-                        className="w-full text-sm border border-slate-300 rounded-md px-2.5 py-1.5 outline-none focus:border-blue-500 bg-white"
+                        className="w-full text-sm border border-slate-300 rounded-md px-2.5 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 font-medium"
                       >
-                        <option value="staff">Nhân viên (Staff)</option>
-                        <option value="admin">Quản trị (Admin)</option>
+                        <option value="staff" className="bg-white text-slate-900">Nhân viên (Staff)</option>
+                        <option value="admin" className="bg-white text-slate-900">Quản trị (Admin)</option>
                       </select>
                     </div>
                   </div>
@@ -498,7 +498,7 @@ export function UserManagementModal({
                   <button
                     type="submit"
                     disabled={isCreating || isStaffQuotaReached}
-                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-md text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors cursor-pointer"
                   >
                     {isCreating ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -514,76 +514,76 @@ export function UserManagementModal({
 
               {/* Bảng danh sách tài khoản */}
               <div>
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 mb-2">
                   Danh sách tài khoản hiện có ({users.length})
                 </h4>
                 {isLoading ? (
-                  <div className="text-center text-sm text-slate-400 py-6">
+                  <div className="text-center text-sm text-slate-500 py-6">
                     Đang tải danh sách tài khoản...
                   </div>
                 ) : (
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
+                  <div className="border border-slate-200 rounded-lg overflow-hidden bg-white">
                     <table className="w-full text-sm">
-                      <thead className="bg-slate-50 text-xs text-slate-500 border-b border-slate-200">
+                      <thead className="bg-slate-50 text-xs text-slate-700 border-b border-slate-200">
                         <tr>
-                          <th className="text-left py-2.5 px-3 font-medium">
+                          <th className="text-left py-2.5 px-3 font-bold text-slate-800">
                             Tài khoản
                           </th>
-                          <th className="text-left py-2.5 px-3 font-medium">
+                          <th className="text-left py-2.5 px-3 font-bold text-slate-800">
                             Họ tên / Email
                           </th>
-                          <th className="text-left py-2.5 px-3 font-medium">
+                          <th className="text-left py-2.5 px-3 font-bold text-slate-800">
                             Vai trò
                           </th>
-                          <th className="text-left py-2.5 px-3 font-medium">
+                          <th className="text-left py-2.5 px-3 font-bold text-slate-800">
                             Trạng thái
                           </th>
-                          <th className="text-right py-2.5 px-3 font-medium">
+                          <th className="text-right py-2.5 px-3 font-bold text-slate-800">
                             Thao tác
                           </th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-100">
+                      <tbody className="divide-y divide-slate-100 bg-white text-slate-900">
                         {users.map((u) => {
                           const isSelf = u.id === currentUser.id;
                           return (
                             <React.Fragment key={u.id}>
                               <tr className="hover:bg-slate-50/70">
-                                <td className="py-2.5 px-3 font-medium text-slate-800">
+                                <td className="py-2.5 px-3 font-bold text-slate-900">
                                   {u.username}
                                   {isSelf && (
-                                    <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-normal">
+                                    <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-bold">
                                       Bạn
                                     </span>
                                   )}
-                                  <div className="text-[11px] text-slate-400 font-normal">
+                                  <div className="text-[11px] text-slate-500 font-normal">
                                     Tạo: {formatDate(u.created_at)}
                                   </div>
                                 </td>
-                                <td className="py-2.5 px-3 text-slate-600 text-xs">
+                                <td className="py-2.5 px-3 text-slate-800 text-xs font-medium">
                                   <div>{u.full_name || "—"}</div>
                                   {u.email && (
-                                    <div className="text-slate-400">{u.email}</div>
+                                    <div className="text-slate-500">{u.email}</div>
                                   )}
                                 </td>
                                 <td className="py-2.5 px-3">
                                   {u.role === "admin" ? (
-                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-medium">
+                                    <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 font-bold">
                                       <Shield className="w-3 h-3" /> Quản trị
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-700">
+                                    <span className="inline-flex items-center text-xs px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 font-semibold">
                                       Nhân viên
                                     </span>
                                   )}
                                 </td>
                                 <td className="py-2.5 px-3">
                                   {u.is_active ? (
-                                    <span className="inline-flex items-center text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                    <span className="inline-flex items-center text-xs text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full font-bold">
                                       Hoạt động
                                     </span>
                                   ) : (
-                                    <span className="inline-flex items-center text-xs text-red-700 bg-red-50 px-2 py-0.5 rounded-full">
+                                    <span className="inline-flex items-center text-xs text-red-700 bg-red-50 px-2 py-0.5 rounded-full font-bold">
                                       Đã khoá
                                     </span>
                                   )}
@@ -598,7 +598,7 @@ export function UserManagementModal({
                                         );
                                         setResetNewPassword("");
                                       }}
-                                      className="p-1.5 rounded hover:bg-slate-100 text-slate-600"
+                                      className="p-1.5 rounded hover:bg-slate-100 text-slate-700 cursor-pointer"
                                       title="Cấp lại mật khẩu"
                                     >
                                       <KeyRound className="w-3.5 h-3.5" />
@@ -609,7 +609,7 @@ export function UserManagementModal({
                                           type="button"
                                           disabled={isActionLoading === u.id}
                                           onClick={() => handleToggleActive(u)}
-                                          className="p-1.5 rounded hover:bg-slate-100 text-slate-600"
+                                          className="p-1.5 rounded hover:bg-slate-100 text-slate-700 cursor-pointer"
                                           title={
                                             u.is_active
                                               ? "Khoá tài khoản"
@@ -626,7 +626,7 @@ export function UserManagementModal({
                                           type="button"
                                           disabled={isActionLoading === u.id}
                                           onClick={() => handleDeleteUser(u)}
-                                          className="p-1.5 rounded hover:bg-red-50 text-red-600"
+                                          className="p-1.5 rounded hover:bg-red-50 text-red-600 cursor-pointer"
                                           title="Xoá tài khoản"
                                         >
                                           <Trash2 className="w-3.5 h-3.5" />
@@ -640,7 +640,7 @@ export function UserManagementModal({
                                 <tr className="bg-blue-50/50">
                                   <td colSpan={5} className="px-3 py-2.5">
                                     <div className="flex flex-wrap items-center gap-2 justify-end">
-                                      <span className="text-xs text-slate-700 font-medium">
+                                      <span className="text-xs text-slate-800 font-bold">
                                         Đặt mật khẩu mới cho{" "}
                                         <strong>{u.username}</strong>:
                                       </span>
@@ -652,14 +652,14 @@ export function UserManagementModal({
                                             setResetNewPassword(e.target.value)
                                           }
                                           placeholder="Tối thiểu 10 ký tự (chữ + số)"
-                                          className="text-xs border border-slate-300 rounded px-2.5 py-1 pr-7 bg-white outline-none focus:border-blue-500 w-56"
+                                          className="text-xs border border-slate-300 rounded px-2.5 py-1 pr-7 bg-white text-slate-900 outline-none focus:border-blue-500 w-56 placeholder:text-slate-400 font-medium"
                                         />
                                         <button
                                           type="button"
                                           onClick={() =>
                                             setShowResetPwd((v) => !v)
                                           }
-                                          className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400"
+                                          className="absolute inset-y-0 right-0 pr-2 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
                                         >
                                           {showResetPwd ? (
                                             <EyeOff className="w-3.5 h-3.5" />
@@ -677,14 +677,14 @@ export function UserManagementModal({
                                         onClick={() =>
                                           handleResetPassword(u.id, u.username)
                                         }
-                                        className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                                        className="text-xs px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 font-bold cursor-pointer"
                                       >
                                         Lưu mật khẩu
                                       </button>
                                       <button
                                         type="button"
                                         onClick={() => setResetTargetId(null)}
-                                        className="text-xs px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-600 hover:bg-slate-50"
+                                        className="text-xs px-2.5 py-1 rounded bg-white border border-slate-300 text-slate-700 hover:bg-slate-50 cursor-pointer"
                                       >
                                         Huỷ
                                       </button>
@@ -705,15 +705,15 @@ export function UserManagementModal({
             /* Tab đổi mật khẩu cá nhân */
             <form
               onSubmit={handleChangeMyPassword}
-              className="max-w-md mx-auto bg-white border border-slate-200 rounded-lg p-5 space-y-4"
+              className="max-w-md mx-auto bg-white border border-slate-200 rounded-lg p-5 space-y-4 text-slate-900"
             >
-              <div className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+              <div className="flex items-center gap-2 text-sm font-bold text-slate-900">
                 <KeyRound className="w-4 h-4 text-blue-600" />
                 <span>Đổi mật khẩu tài khoản ({currentUser.username})</span>
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
+                <label className="block text-xs font-bold text-slate-800 mb-1">
                   Mật khẩu hiện tại <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -721,12 +721,12 @@ export function UserManagementModal({
                   value={oldPassword}
                   onChange={(e) => setOldPassword(e.target.value)}
                   required
-                  className="w-full text-sm border border-slate-300 rounded-md px-3 py-1.5 outline-none focus:border-blue-500"
+                  className="w-full text-sm border border-slate-300 rounded-md px-3 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 font-medium"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-1">
+                <label className="block text-xs font-bold text-slate-800 mb-1">
                   Mật khẩu mới <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
@@ -738,12 +738,12 @@ export function UserManagementModal({
                     minLength={10}
                     maxLength={128}
                     required
-                    className="w-full text-sm border border-slate-300 rounded-md pl-3 pr-9 py-1.5 outline-none focus:border-blue-500"
+                    className="w-full text-sm border border-slate-300 rounded-md pl-3 pr-9 py-1.5 outline-none focus:border-blue-500 bg-white text-slate-900 placeholder:text-slate-400 font-medium"
                   />
                   <button
                     type="button"
                     onClick={() => setShowMyPwd((v) => !v)}
-                    className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600"
+                    className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
                   >
                     {showMyPwd ? (
                       <EyeOff className="w-4 h-4" />
@@ -752,7 +752,7 @@ export function UserManagementModal({
                     )}
                   </button>
                 </div>
-                <span className="text-[11px] text-slate-400">
+                <span className="text-[11px] text-slate-500">
                   Sau khi đổi mật khẩu, phiên đăng nhập hiện tại sẽ tự đăng xuất để bảo mật.
                 </span>
               </div>
@@ -761,7 +761,7 @@ export function UserManagementModal({
                 <button
                   type="submit"
                   disabled={isChangingMyPwd}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-medium text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 disabled:opacity-50 cursor-pointer"
                 >
                   {isChangingMyPwd && (
                     <Loader2 className="w-3.5 h-3.5 animate-spin" />

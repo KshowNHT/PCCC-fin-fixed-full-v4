@@ -58,22 +58,22 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({ onUpload
           value={code}
           onChange={(e) => setCode(e.target.value)}
           placeholder="Mã hiệu (vd: QCVN 06:2022)"
-          className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange"
+          className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange text-slate-900 placeholder:text-slate-400 font-medium"
         />
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Tên văn bản / Tiêu chuẩn..."
-          className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange"
+          className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange text-slate-900 placeholder:text-slate-400 font-medium"
         />
         <select
           value={docType}
           onChange={(e) => setDocType(e.target.value)}
-          className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange"
+          className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange text-slate-900 font-medium"
         >
           {["TCVN", "QCVN", "Nghị định", "Thông tư", "LUẬT", "Khác"].map((t) => (
-            <option key={t} value={t}>{t}</option>
+            <option key={t} value={t} className="text-slate-900 bg-white">{t}</option>
           ))}
         </select>
       </div>

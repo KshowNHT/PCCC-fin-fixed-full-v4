@@ -45,8 +45,8 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+      <div className="bg-white text-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-600 flex items-center justify-center">
               <BookOpen className="w-4.5 h-4.5" />
@@ -61,7 +61,7 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
           </button>
         </div>
 
-        <div className="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar text-slate-900">
           <DocumentUploadForm onUpload={handleUploadWrapper} isUploading={isUploading} />
 
           <div className="flex items-center justify-between gap-3 pt-2">
@@ -72,7 +72,7 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Tìm kiếm văn bản (QCVN, TCVN, Nghị định...)"
-                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange"
+                className="w-full pl-8 pr-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange text-slate-900 placeholder:text-slate-400 font-medium"
               />
             </div>
 

@@ -35,8 +35,8 @@ export const BasementFunctionsSubform: React.FC<BasementFunctionsSubformProps> =
   if (basementsCount < 1) return null;
 
   return (
-    <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 space-y-2.5">
-      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+    <div className="bg-slate-50 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 rounded-xl p-3 space-y-2.5">
+      <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
         <ArrowDownToLine className="w-3.5 h-3.5 text-brand-orange" />
         <span>Thông số chi tiết {basementsCount} tầng hầm</span>
       </div>
@@ -50,17 +50,17 @@ export const BasementFunctionsSubform: React.FC<BasementFunctionsSubformProps> =
           const curFootprint = footprints[idx] ?? 0;
 
           return (
-            <div key={`basement-${bNum}`} className="bg-white p-2.5 rounded-lg border border-slate-200 text-xs space-y-2">
-              <div className="font-bold text-slate-800 text-[11px] pb-1 border-b border-slate-100 flex justify-between">
+            <div key={`basement-${bNum}`} className="bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs space-y-2">
+              <div className="font-bold text-slate-800 dark:text-slate-200 text-[11px] pb-1 border-b border-slate-100 dark:border-slate-800 flex justify-between">
                 <span>Tầng hầm B{bNum}</span>
               </div>
 
               <div>
-                <label className="block text-[10px] font-medium text-slate-500 mb-0.5">Công năng</label>
+                <label className="block text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-0.5">Công năng</label>
                 <select
                   value={curFn}
                   onChange={(e) => onChangeField(idx, "functions", e.target.value)}
-                  className="w-full px-2 py-1 bg-slate-50 border border-slate-200 rounded text-xs outline-none focus:bg-white focus:border-brand-orange text-slate-800"
+                  className="w-full px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-xs outline-none focus:bg-white dark:focus:bg-slate-800 focus:border-brand-orange text-slate-800 dark:text-slate-200"
                 >
                   {BASEMENT_OPTIONS.map((opt) => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
@@ -70,7 +70,7 @@ export const BasementFunctionsSubform: React.FC<BasementFunctionsSubformProps> =
 
               <div className="grid grid-cols-3 gap-1.5">
                 <div>
-                  <span className="block text-[10px] font-medium text-slate-500">Cao (m)</span>
+                  <span className="block text-[10px] font-medium text-slate-500 dark:text-slate-400">Cao (m)</span>
                   <input
                     type="number"
                     min="0"
@@ -79,12 +79,12 @@ export const BasementFunctionsSubform: React.FC<BasementFunctionsSubformProps> =
                     value={curHeight}
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => onChangeField(idx, "heights", Math.min(100, Math.max(0, Number(e.target.value) || 0)))}
-                    className="w-full px-1.5 py-1 bg-slate-50 border border-slate-200 rounded text-center text-xs outline-none focus:bg-white"
+                    className="w-full px-1.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-center text-xs outline-none focus:bg-white dark:focus:bg-slate-800 text-slate-900 dark:text-slate-100"
                   />
                 </div>
 
                 <div>
-                  <span className="block text-[10px] font-medium text-slate-500">DT sàn (m²)</span>
+                  <span className="block text-[10px] font-medium text-slate-500 dark:text-slate-400">DT sàn (m²)</span>
                   <input
                     type="number"
                     min="0"
@@ -92,12 +92,12 @@ export const BasementFunctionsSubform: React.FC<BasementFunctionsSubformProps> =
                     value={curArea}
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => onChangeField(idx, "areas", Math.min(1000000, Math.max(0, Number(e.target.value) || 0)))}
-                    className="w-full px-1.5 py-1 bg-slate-50 border border-slate-200 rounded text-center text-xs outline-none focus:bg-white"
+                    className="w-full px-1.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-center text-xs outline-none focus:bg-white dark:focus:bg-slate-800 text-slate-900 dark:text-slate-100"
                   />
                 </div>
 
                 <div>
-                  <span className="block text-[10px] font-medium text-slate-500">DT xây dựng</span>
+                  <span className="block text-[10px] font-medium text-slate-500 dark:text-slate-400">DT xây dựng</span>
                   <input
                     type="number"
                     min="0"
@@ -105,7 +105,7 @@ export const BasementFunctionsSubform: React.FC<BasementFunctionsSubformProps> =
                     value={curFootprint}
                     onFocus={(e) => e.target.select()}
                     onChange={(e) => onChangeField(idx, "footprints", Math.min(1000000, Math.max(0, Number(e.target.value) || 0)))}
-                    className="w-full px-1.5 py-1 bg-slate-50 border border-slate-200 rounded text-center text-xs outline-none focus:bg-white"
+                    className="w-full px-1.5 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded text-center text-xs outline-none focus:bg-white dark:focus:bg-slate-800 text-slate-900 dark:text-slate-100"
                   />
                 </div>
               </div>

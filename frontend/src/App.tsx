@@ -17,7 +17,8 @@ import { useAppDocuments } from "./hooks/useAppDocuments";
 import { useAppExport } from "./hooks/useAppExport";
 import { useProjectWarnings } from "./hooks/useProjectWarnings";
 import { useTheme } from "./hooks/useTheme";
-import { ActiveTab, EMPTY_PROJECT, ProjectInfo } from "./types";
+import { ActiveTab, EMPTY_PROJECT, ProjectInfo, DocumentItem } from "./types";
+import { apiFetch } from "./lib/api";
 
 export default function App() {
   const [errorMessage, setErrorMessage] = useState("");
@@ -34,6 +35,40 @@ export default function App() {
   const [isDocumentsModalOpen, setIsDocumentsModalOpen] = useState(false);
   const [isInspectionLogOpen, setIsInspectionLogOpen] = useState(false);
   const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
+  const [citationDoc, setCitationDoc] = useState<DocumentItem | null>(null);
+
+  const handleOpenCitation = async (code: string) => {
+    const cleanCode = code.trim().toLowerCase();
+    const found = docCtrl.documents.find(
+      (d) =>
+        d.code.toLowerCase().includes(cleanCode) ||
+        cleanCode.includes(d.code.toLowerCase()) ||
+        d.title.toLowerCase().includes(cleanCode)
+    );
+    if (found) {
+      setCitationDoc(found);
+      return;
+    }
+    try {
+      const res = await apiFetch(`/api/documents/search?q=${encodeURIComponent(code)}`);
+      if (res.ok) {
+        const results = await res.json();
+        if (results.length > 0) {
+          setCitationDoc(results[0]);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setCitationDoc({
+      id: "citation-" + code.replace(/[^a-zA-Z0-9]/g, "_"),
+      code: code,
+      title: `Văn bản quy phạm [${code}]`,
+      type: "QCVN",
+      link: ""
+    });
+  };
 
   useEffect(() => {
     if (currentUser) {
@@ -115,12 +150,12 @@ export default function App() {
         }
         warningBanner={<AreaWarningBanner warnings={warnings} />}
         activeTab={activeTab}
-        chatContent={<ChatView messages={sessionCtrl.activeSession?.messages || []} isPending={sessionCtrl.isPending} onSendMessage={sessionCtrl.sendMessage} onCancelPending={sessionCtrl.cancelPending} onOpenOcrUpload={() => setIsBlueprintModalOpen(true)} />}
+        chatContent={<ChatView messages={sessionCtrl.activeSession?.messages || []} isPending={sessionCtrl.isPending} onSendMessage={sessionCtrl.sendMessage} onCancelPending={sessionCtrl.cancelPending} onOpenOcrUpload={() => setIsBlueprintModalOpen(true)} onOpenCitation={handleOpenCitation} />}
         checklistContent={<ComplianceChecklistView checklist={sessionCtrl.hasLocalDraft ? [] : sessionCtrl.activeSession?.checklist || []} />}
         verdictContent={<LegalBasisTabWrapper appraisalBasis={sessionCtrl.hasLocalDraft ? null : sessionCtrl.activeSession?.appraisalBasis} isSubjectToAppraisal={sessionCtrl.activeSession?.isSubjectToAppraisal ?? false} appraisalReason={sessionCtrl.hasLocalDraft ? "Chưa kiểm duyệt các thông số mới." : sessionCtrl.activeSession?.appraisalReason || ""} checklist={sessionCtrl.hasLocalDraft ? [] : sessionCtrl.activeSession?.checklist || []} projectInfo={activeProject} isPending={sessionCtrl.isPending} onTriggerAppraisal={sessionCtrl.triggerAppraisal} />}
         specsDrawer={<ProjectSpecsDrawer isOpen={isSpecsDrawerOpen} onClose={() => setIsSpecsDrawerOpen(false)} project={activeProject} onUpdateProject={sessionCtrl.updateProject} onTriggerAppraisal={sessionCtrl.triggerAppraisal} onReloadSession={sessionCtrl.reloadActiveSession} isPending={sessionCtrl.isPending} isSaving={sessionCtrl.isSaving} hasLocalDraft={sessionCtrl.hasLocalDraft} />}
         mobileBottomNav={<MobileBottomNav activeTab={activeTab} onChangeTab={setActiveTab} checklistCount={sessionCtrl.activeSession?.checklist?.length || 0} />}
-        modals={<AppModals isBlueprintOpen={isBlueprintModalOpen} onCloseBlueprint={() => setIsBlueprintModalOpen(false)} sessionId={sessionCtrl.activeSessionId} onApplyOcr={handleApplyOcr} isDocumentsOpen={isDocumentsModalOpen} onCloseDocuments={() => setIsDocumentsModalOpen(false)} documents={docCtrl.documents} onUploadDocument={docCtrl.uploadDocuments} onDeleteDocument={docCtrl.deleteDocument} onResetDocuments={docCtrl.resetDocuments} onDownloadDocument={docCtrl.downloadDocument} isInspectionLogOpen={isInspectionLogOpen} onCloseInspectionLog={() => setIsInspectionLogOpen(false)} isUserManagementOpen={isUserManagementOpen} onCloseUserManagement={() => setIsUserManagementOpen(false)} currentUser={currentUser} onLogout={handleLogout} />}
+        modals={<AppModals isBlueprintOpen={isBlueprintModalOpen} onCloseBlueprint={() => setIsBlueprintModalOpen(false)} sessionId={sessionCtrl.activeSessionId} onApplyOcr={handleApplyOcr} isDocumentsOpen={isDocumentsModalOpen} onCloseDocuments={() => setIsDocumentsModalOpen(false)} documents={docCtrl.documents} onUploadDocument={docCtrl.uploadDocuments} onDeleteDocument={docCtrl.deleteDocument} onResetDocuments={docCtrl.resetDocuments} onDownloadDocument={docCtrl.downloadDocument} isInspectionLogOpen={isInspectionLogOpen} onCloseInspectionLog={() => setIsInspectionLogOpen(false)} isUserManagementOpen={isUserManagementOpen} onCloseUserManagement={() => setIsUserManagementOpen(false)} currentUser={currentUser} onLogout={handleLogout} citationDoc={citationDoc} onCloseCitation={() => setCitationDoc(null)} />}
       />
     </>
   );

@@ -560,6 +560,70 @@ class Operations40(unittest.TestCase):
         self.assertEqual(self.client.delete(f"/api/auth/users/{uid}", headers=self.admin).status_code, 200)
         self.assertEqual(self.client.get("/api/auth/me", headers={"Authorization": "Bearer " + tok}).status_code, 401)
 
+    def test_S33_documents_search_and_inline_preview(self):
+        # 1. Chặn truy cập chưa xác thực 401
+        self.assertEqual(self.client.get("/api/documents/search?q=QCVN").status_code, 401)
+
+        # 2. Tìm kiếm theo mã hiệu văn bản (cả admin và staff đều có quyền tra cứu)
+        res_admin = self.client.get("/api/documents/search?q=QCVN", headers=self.admin)
+        self.assertEqual(res_admin.status_code, 200)
+        items = res_admin.json()
+        self.assertGreater(len(items), 0)
+        self.assertTrue(any("QCVN" in (d["code"] or "").upper() for d in items))
+
+        res_staff = self.client.get("/api/documents/search?q=QCVN", headers=self.staffa)
+        self.assertEqual(res_staff.status_code, 200)
+
+        # 3. Tìm kiếm sâu trong nội dung văn bản (content search + snippet)
+        first_doc = items[0]
+        res_content = self.client.get("/api/documents/search?q=chữa cháy", headers=self.staffa)
+        self.assertEqual(res_content.status_code, 200)
+        content_items = res_content.json()
+        self.assertGreater(len(content_items), 0)
+        for d in content_items:
+            self.assertIn("snippet", d)
+            self.assertIn("matchType", d)
+            self.assertIn("score", d)
+
+        # 4. Xem trước PDF inline trực tiếp (cả 2 endpoint /preview và /download?inline=true)
+        doc_id = first_doc["id"]
+        prev_res = self.client.get(f"/api/documents/{doc_id}/preview", headers=self.staffa)
+        self.assertEqual(prev_res.status_code, 200)
+        self.assertIn("application/pdf", prev_res.headers.get("content-type", ""))
+        self.assertIn("inline;", prev_res.headers.get("content-disposition", ""))
+
+        inline_res = self.client.get(f"/api/documents/{doc_id}/download?format=pdf&inline=true", headers=self.staffa)
+        self.assertEqual(inline_res.status_code, 200)
+        self.assertIn("application/pdf", inline_res.headers.get("content-type", ""))
+        self.assertIn("inline;", inline_res.headers.get("content-disposition", ""))
+
+    def test_S34_hybrid_rag_citations_and_clickable_law_codes(self):
+        # 1. Tạo session đã kiểm duyệt với công trình karaoke
+        sid = self.session(project={"type": "Cơ sở kinh doanh karaoke, vũ trường", "floors": 4, "totalFloorArea": 600, "pcccHeight": 12}, reviewed=True)
+
+        # 2. Gửi câu hỏi yêu cầu thẩm duyệt & trích dẫn quy chuẩn
+        r = self.client.post("/api/chat", headers=self.staffa, json={
+            "sessionId": sid,
+            "messageText": "Công trình này có thuộc diện thẩm duyệt PCCC không? Hãy trích dẫn căn cứ luật."
+        })
+        self.assertEqual(r.status_code, 200, r.text)
+        data = r.json()
+        self.assertIn("reply", data)
+        self.assertIn("citations", data)
+        self.assertGreater(len(data["citations"]), 0)
+
+        # Kiểm tra trích dẫn văn bản luật thực tế trong response
+        codes = [c["code"] for c in data["citations"]]
+        self.assertTrue(any("105/2025" in c or "NĐ105" in c for c in codes))
+        self.assertTrue(any("QCVN 06" in c for c in codes))
+        self.assertTrue(any("147/2020" in c for c in codes))
+
+        # Kiểm tra thẻ [Mã văn bản] xuất hiện trong câu trả lời văn bản
+        reply_text = data["reply"]
+        self.assertIn("[QCVN 06", reply_text)
+        self.assertIn("[147/2020/TT-BCA]", reply_text)
+
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

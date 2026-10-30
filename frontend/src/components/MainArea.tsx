@@ -25,9 +25,12 @@ import {
   Eye,
   EyeOff
 } from "lucide-react";
-import { AppraisalBasis, ChatMessage, ChecklistItem, ProjectInfo } from "../types";
+import { AppraisalBasis, ChatMessage, ChecklistItem, ProjectInfo, DocumentItem } from "../types";
 import { LegalBasisPanel, VERDICT_STYLES, VerdictIcon, resolveStatus, verdictHeading } from "./LegalBasisPanel";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from "recharts";
+import { DocumentPreviewModal } from "./DocumentPreviewModal";
+import { ChatCitationBadge } from "../features/chat/components/ChatCitationBadge";
+import { apiFetch } from "../lib/api";
 
 interface MainAreaProps {
   sessionTitle: string;
@@ -101,6 +104,29 @@ export function MainArea({
   const [isWarningsExpanded, setIsWarningsExpanded] = useState(true);
   const [sortColumn, setSortColumn] = useState<"stt" | "criteria" | "result" | null>("stt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [citationDoc, setCitationDoc] = useState<DocumentItem | null>(null);
+
+  const handleOpenCitation = async (code: string) => {
+    try {
+      const res = await apiFetch(`/api/documents/search?q=${encodeURIComponent(code)}`);
+      if (res.ok) {
+        const results = await res.json();
+        if (results.length > 0) {
+          setCitationDoc(results[0]);
+          return;
+        }
+      }
+    } catch {
+      // ignore
+    }
+    setCitationDoc({
+      id: "citation-" + code.replace(/[^a-zA-Z0-9]/g, "_"),
+      code: code,
+      title: `Văn bản quy phạm [${code}]`,
+      type: "QCVN",
+      link: ""
+    });
+  };
 
   // FIX B19 (Bao_Cao_QA_Lan_3.md — Trung bình): trước đây banner cảnh báo
   // mâu thuẫn diện tích chỉ dựa vào `warnings` — 1 state CHỈ cập nhật SAU
@@ -238,6 +264,51 @@ export function MainArea({
     }
   }, [messages, sessionTitle, onToggleSidebar, isSidebarOpen]);
 
+  // Trích xuất các mã văn bản luật trong ngoặc vuông [Mã văn bản] (Ngày 4 kế hoạch)
+  const CITATION_REGEX = /\[([A-Z0-9À-ỹ0-9\/\:\.\-\(\)\s]{3,45})\]/g;
+
+  const renderLineWithCitations = (lineText: string, keyPrefix: string) => {
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    const regex = new RegExp(CITATION_REGEX);
+
+    while ((match = regex.exec(lineText)) !== null) {
+      const matchStart = match.index;
+      const matchEnd = regex.lastIndex;
+      const code = match[1].trim();
+
+      if (code.toLowerCase() === "mã văn bản" || code.toLowerCase() === "ma van ban") {
+        if (matchStart > lastIndex) {
+          parts.push(lineText.substring(lastIndex, matchStart));
+        }
+        parts.push(match[0]);
+        lastIndex = matchEnd;
+        continue;
+      }
+
+      if (matchStart > lastIndex) {
+        parts.push(lineText.substring(lastIndex, matchStart));
+      }
+
+      parts.push(
+        <ChatCitationBadge
+          key={`${keyPrefix}-cit-${matchStart}`}
+          code={code}
+          onClick={handleOpenCitation}
+        />
+      );
+
+      lastIndex = matchEnd;
+    }
+
+    if (lastIndex < lineText.length) {
+      parts.push(lineText.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : lineText;
+  };
+
   // Dynamic advice text formatting function - splits text to clear newline items and strips all asterisks
   const renderFormattedMessageText = (text: string) => {
     const rawLines = text.split("\n");
@@ -263,7 +334,7 @@ export function MainArea({
           <div key={`bullet-${idx}`} className="flex items-start gap-2 text-slate-800 pl-4 py-0.5">
             <span className="w-1.5 h-1.5 rounded-full bg-brand-orange mt-2 shrink-0" />
             <span className="text-[13px] md:text-sm font-sans leading-relaxed">
-              {content}
+              {renderLineWithCitations(content, `b-${idx}`)}
             </span>
           </div>
         );
@@ -281,7 +352,7 @@ export function MainArea({
                 {num}
               </span>
               <span className="text-[13px] md:text-sm font-sans leading-relaxed">
-                {content}
+                {renderLineWithCitations(content, `n-${idx}`)}
               </span>
             </div>
           );
@@ -298,7 +369,7 @@ export function MainArea({
             key={`heading-${idx}`}
             className="text-xs sm:text-sm font-black text-slate-900 mt-4 mb-1.5 first:mt-0 font-sans tracking-tight uppercase"
           >
-            {headingContent}
+            {renderLineWithCitations(headingContent, `h-${idx}`)}
           </h4>
         );
         return;
@@ -307,7 +378,7 @@ export function MainArea({
       // Normal text paragraph
       formattedElements.push(
         <p key={`para-${idx}`} className="text-[13px] md:text-sm text-slate-800 font-sans leading-relaxed">
-          {cleanLine}
+          {renderLineWithCitations(cleanLine, `p-${idx}`)}
         </p>
       );
     });
@@ -2122,6 +2193,14 @@ export function MainArea({
 
           </div>
         </div>
+      )}
+      {/* Modal xem trước trực tiếp PDF luật khi bấm thẻ trích dẫn [Mã văn bản] trong chat (Ngày 4 kế hoạch) */}
+      {citationDoc && (
+        <DocumentPreviewModal
+          previewDoc={citationDoc}
+          onClose={() => setCitationDoc(null)}
+          onDownload={() => {}}
+        />
       )}
       </div>
     </div>

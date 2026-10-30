@@ -1,12 +1,14 @@
 import React, { useState } from "react";
-import { Flame, User, Copy, Check } from "lucide-react";
+import { Flame, User, Copy, Check, BookOpen } from "lucide-react";
 import { ChatMessage } from "../../../types";
+import { ChatCitationBadge } from "./ChatCitationBadge";
 
 interface MessageItemProps {
   message: ChatMessage;
+  onOpenCitation?: (code: string) => void;
 }
 
-export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) => {
+export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, onOpenCitation }) => {
   const isAssistant = message.sender === "assistant";
   const [copied, setCopied] = useState(false);
 
@@ -18,6 +20,55 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
     } catch {
       // Ignore clipboard write failures
     }
+  };
+
+  // Trích xuất các mã văn bản luật trong ngoặc vuông [Mã văn bản] (Ngày 4 kế hoạch)
+  const CITATION_REGEX = /\[([A-Z0-9À-ỹ0-9\/\:\.\-\(\)\s]{3,45})\]/g;
+
+  const renderLineWithCitations = (lineText: string, keyPrefix: string) => {
+    if (!isAssistant || !onOpenCitation) {
+      return lineText;
+    }
+
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    let match: RegExpExecArray | null;
+    const regex = new RegExp(CITATION_REGEX);
+
+    while ((match = regex.exec(lineText)) !== null) {
+      const matchStart = match.index;
+      const matchEnd = regex.lastIndex;
+      const code = match[1].trim();
+
+      if (code.toLowerCase() === "mã văn bản" || code.toLowerCase() === "ma van ban") {
+        if (matchStart > lastIndex) {
+          parts.push(lineText.substring(lastIndex, matchStart));
+        }
+        parts.push(match[0]);
+        lastIndex = matchEnd;
+        continue;
+      }
+
+      if (matchStart > lastIndex) {
+        parts.push(lineText.substring(lastIndex, matchStart));
+      }
+
+      parts.push(
+        <ChatCitationBadge
+          key={`${keyPrefix}-cit-${matchStart}`}
+          code={code}
+          onClick={onOpenCitation}
+        />
+      );
+
+      lastIndex = matchEnd;
+    }
+
+    if (lastIndex < lineText.length) {
+      parts.push(lineText.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : lineText;
   };
 
   const formattedLines = message.text.split("\n").map((line, index) => {
@@ -33,10 +84,25 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
           isBullet ? "pl-3 text-slate-800 dark:text-slate-200 font-medium" : "text-slate-900 dark:text-slate-100"
         }`}
       >
-        {trimmed}
+        {renderLineWithCitations(trimmed, `l-${index}`)}
       </p>
     );
   });
+
+  // Tìm tất cả các mã văn bản để làm danh sách trích dẫn nhanh dưới chân tin nhắn
+  const allCodes = React.useMemo(() => {
+    if (!isAssistant) return [];
+    const codes = new Set<string>();
+    let m: RegExpExecArray | null;
+    const reg = new RegExp(CITATION_REGEX);
+    while ((m = reg.exec(message.text)) !== null) {
+      const c = m[1].trim();
+      if (c.toLowerCase() !== "mã văn bản" && c.toLowerCase() !== "ma van ban") {
+        codes.add(c);
+      }
+    }
+    return Array.from(codes);
+  }, [message.text, isAssistant]);
 
   return (
     <div
@@ -75,10 +141,26 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message }) 
         </div>
 
         <div className="space-y-1 text-slate-800 dark:text-slate-100">{formattedLines}</div>
+
+        {/* Nguồn trích dẫn văn bản luật (Ngày 4: bấm trực tiếp vào mã văn bản để mở PDF) */}
+        {isAssistant && allCodes.length > 0 && onOpenCitation && (
+          <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-[11.5px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
+              <BookOpen className="w-3.5 h-3.5 text-brand-orange" />
+              Nguồn văn bản luật:
+            </span>
+            {allCodes.map((code) => (
+              <ChatCitationBadge
+                key={`footer-${code}`}
+                code={code}
+                onClick={onOpenCitation}
+              />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
 });
 
 MessageItem.displayName = "MessageItem";
-

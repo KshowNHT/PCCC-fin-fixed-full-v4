@@ -6,6 +6,7 @@
 # -------------------------
 # Secrets / environment
 # -------------------------
+~$*
 .env
 .env.*
 !.env.example
@@ -142,5 +143,24 @@ start-dev.bat
 .agents/
 AGENTS.md
 skills-lock.json
+
+# Tài liệu kế hoạch & Playwright test cục bộ theo yêu cầu
+Ke_hoach_Rut_Gon_14_Ngay_PCCC.docx
+docs/Ke_hoach_Rut_Gon_14_Ngay_PCCC.docx
+Tai_Lieu_Test_Case_*.docx
+docs/Tai_Lieu_Test_Case_*.docx
+~$_hoach_Rut_Gon_14_Ngay_PCCC.docx
+~$*.docx
+frontend/e2e/
+frontend/playwright.config.ts
+frontend/tests/day2_document_rbac_test.tsx
+frontend/test-results/
+frontend/playwright-report/
+frontend/blob-report/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
 
 

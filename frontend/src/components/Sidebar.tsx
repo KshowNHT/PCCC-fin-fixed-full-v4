@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { ProjectInfo, DocumentItem } from "../types";
 import { BuildingEditor } from "./BuildingEditor";
+import { DocumentPreviewModal } from "./DocumentPreviewModal";
 import { apiFetch } from "../lib/api";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
@@ -43,6 +44,8 @@ interface SidebarProps {
   isPending: boolean;
   isSidebarOpen: boolean;
   setIsSidebarOpen: (open: boolean) => void;
+  userRole?: string;
+  isAdmin?: boolean;
 }
 
 export function Sidebar({
@@ -63,8 +66,11 @@ export function Sidebar({
   onTriggerAppraisal,
   isPending,
   isSidebarOpen,
-  setIsSidebarOpen
+  setIsSidebarOpen,
+  userRole,
+  isAdmin: isAdminProp
 }: SidebarProps) {
+  const isAdmin = isAdminProp !== undefined ? isAdminProp : (userRole ? userRole === "admin" : false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [docCode, setDocCode] = useState("");
   const [docTitle, setDocTitle] = useState("");
@@ -72,6 +78,9 @@ export function Sidebar({
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
+  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+
   const downloadDocument = async (doc: DocumentItem) => {
     try {
       const res = await apiFetch(`/api/documents/${doc.id}/download?format=pdf`);
@@ -89,6 +98,32 @@ export function Sidebar({
   };
   const [docSearchQuery, setDocSearchQuery] = useState("");
   const [uploadProgress, setUploadProgress] = useState<{ [filename: string]: number }>({});
+
+  // Tự động tìm kiếm sâu (Deep Search) trong toàn bộ kho luật
+  useEffect(() => {
+    const q = docSearchQuery.trim();
+    if (!q) {
+      setSearchResults(null);
+      setIsSearching(false);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const res = await apiFetch(`/api/documents/search?q=${encodeURIComponent(q)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSearchResults(data);
+        }
+      } catch {
+        // Fallback to local filter
+      } finally {
+        setIsSearching(false);
+      }
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [docSearchQuery]);
+
 
   // Local temporary states for input fields to prevent typing lag
   const [localName, setLocalName] = useState(project.name || "");
@@ -225,12 +260,13 @@ export function Sidebar({
     }
   };
 
-  const filteredDocuments = documents.filter((doc) => {
+  const filteredDocuments = searchResults !== null ? searchResults : documents.filter((doc) => {
     const q = docSearchQuery.toLowerCase().trim();
     if (!q) return true;
     return (
       (doc.code && doc.code.toLowerCase().includes(q)) ||
-      (doc.title && doc.title.toLowerCase().includes(q))
+      (doc.title && doc.title.toLowerCase().includes(q)) ||
+      (doc.content && doc.content.toLowerCase().includes(q))
     );
   });
 
@@ -753,14 +789,16 @@ export function Sidebar({
               <FileBadge className="w-4.5 h-4.5 text-brand-orange" />
               <h2 className="text-[16px] font-black uppercase tracking-wider text-black font-display">Cơ sở dữ liệu pháp lý</h2>
             </div>
-            <button
-              onClick={onResetDocuments}
-              id="btn-reset-kb"
-              title="Khôi phục mặc định"
-              className="text-black hover:text-red-650 transition-colors cursor-pointer"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            {isAdmin && (
+              <button
+                onClick={onResetDocuments}
+                id="btn-reset-kb"
+                title="Khôi phục mặc định"
+                className="text-black hover:text-red-650 transition-colors cursor-pointer"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
           </div>
 
           {/* Doc List Summary */}
@@ -828,13 +866,20 @@ export function Sidebar({
                     }`}
                     title={hoverTitle}
                   >
-                    <div className="truncate pr-1 flex items-center gap-1.5 min-w-0">
-                      <span className="bg-brand-orange/15 text-brand-orange font-black font-mono text-[12.5px] rounded px-1.5 py-0.5 uppercase shrink-0 border border-brand-orange/20">
-                        {badgeText}
-                      </span>
-                      <span className={`truncate text-[14.5px] group-hover:text-black transition-colors ${doc.isCustom ? "font-black text-slate-950" : "text-black font-bold"}`}>
-                        {displayedTitle}
-                      </span>
+                    <div className="truncate pr-1 flex flex-col min-w-0">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="bg-brand-orange/15 text-brand-orange font-black font-mono text-[12.5px] rounded px-1.5 py-0.5 uppercase shrink-0 border border-brand-orange/20">
+                          {badgeText}
+                        </span>
+                        <span className={`truncate text-[14.5px] group-hover:text-black transition-colors ${doc.isCustom ? "font-black text-slate-950" : "text-black font-bold"}`}>
+                          {displayedTitle}
+                        </span>
+                      </div>
+                      {(doc as any).snippet && (
+                        <p className="text-[11px] text-slate-500 italic truncate pl-1 mt-0.5" title={(doc as any).snippet}>
+                          "{(doc as any).snippet}"
+                        </p>
+                      )}
                     </div>
                     <div 
                       className="flex items-center gap-1 shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity"
@@ -856,13 +901,15 @@ export function Sidebar({
                       >
                         <Download className="w-3" />
                       </a>
-                      <button
-                        onClick={() => onDeleteDocument(doc.id)}
-                        title="Xóa tài liệu"
-                        className="text-slate-500 hover:text-brand-orange p-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer"
-                      >
-                        <Trash2 className="w-3" />
-                      </button>
+                      {isAdmin && (
+                        <button
+                          onClick={() => onDeleteDocument(doc.id)}
+                          title="Xóa tài liệu"
+                          className="text-slate-500 hover:text-brand-orange p-0.5 rounded hover:bg-slate-200 transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-3" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
@@ -871,71 +918,81 @@ export function Sidebar({
           </div>
 
           {/* Custom RAG File Upload Panel */}
-          <div className="bg-slate-50 border border-dashed border-slate-350 rounded-lg p-3 space-y-2">
-            <h3 className="text-[15px] font-black text-black">Tải lên văn bản pháp luật (.pdf, .docx, .txt)</h3>
-            <div className="grid grid-cols-2 gap-1.5 font-sans">
+          {isAdmin ? (
+            <div className="bg-slate-50 border border-dashed border-slate-350 rounded-lg p-3 space-y-2">
+              <h3 className="text-[15px] font-black text-black">Tải lên văn bản pháp luật (.pdf, .docx, .txt)</h3>
+              <div className="grid grid-cols-2 gap-1.5 font-sans">
+                <input
+                  type="text"
+                  placeholder="Mã/Ký hiệu"
+                  value={docCode}
+                  onChange={(e) => setDocCode(e.target.value)}
+                  className="px-2 py-1 bg-white border border-slate-250 rounded text-[14px] text-black font-bold outline-none focus:border-brand-orange transition-all font-mono"
+                />
+                <select
+                  value={docType}
+                  onChange={(e) => setDocType(e.target.value)}
+                  className="px-1.5 py-1 bg-white border border-slate-250 rounded text-[14px] text-black font-bold outline-none focus:border-brand-orange"
+                >
+                  <option value="LUẬT">Luật</option>
+                  <option value="Nghị định">Nghị định</option>
+                  <option value="Thông tư">Thông tư</option>
+                  <option value="QCVN">QCVN</option>
+                  <option value="TCVN">TCVN</option>
+                </select>
+              </div>
               <input
                 type="text"
-                placeholder="Mã/Ký hiệu"
-                value={docCode}
-                onChange={(e) => setDocCode(e.target.value)}
-                className="px-2 py-1 bg-white border border-slate-250 rounded text-[14px] text-black font-bold outline-none focus:border-brand-orange transition-all font-mono"
+                placeholder="Tên văn bản chi tiết (chỉ cho 1 file)"
+                value={docTitle}
+                onChange={(e) => setDocTitle(e.target.value)}
+                className="w-full px-2 py-1 bg-white border border-slate-250 rounded text-[14px] text-black font-bold outline-none focus:border-brand-orange font-sans"
               />
-              <select
-                value={docType}
-                onChange={(e) => setDocType(e.target.value)}
-                className="px-1.5 py-1 bg-white border border-slate-250 rounded text-[14px] text-black font-bold outline-none focus:border-brand-orange"
-              >
-                <option value="LUẬT">Luật</option>
-                <option value="Nghị định">Nghị định</option>
-                <option value="Thông tư">Thông tư</option>
-                <option value="QCVN">QCVN</option>
-                <option value="TCVN">TCVN</option>
-              </select>
-            </div>
-            <input
-              type="text"
-              placeholder="Tên văn bản chi tiết (chỉ cho 1 file)"
-              value={docTitle}
-              onChange={(e) => setDocTitle(e.target.value)}
-              className="w-full px-2 py-1 bg-white border border-slate-250 rounded text-[14px] text-black font-bold outline-none focus:border-brand-orange font-sans"
-            />
-            <div className="relative">
-              <input
-                type="file"
-                ref={fileInputRef}
-                accept=".pdf,.docx,.txt"
-                multiple
-                onChange={handleFileUpload}
-                disabled={isUploading}
-                className="hidden"
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
-                style={{ textShadow: "0 1px 2px rgba(0,0,0,0.2)" }}
-                className="w-full flex items-center justify-center gap-2.5 py-3 px-4 bg-brand-orange hover:bg-brand-orange/95 text-white rounded-xl border-b-[4px] border-[#9E3600] shadow-[0_4px_12px_rgba(234,88,12,0.3),inset_0_1px_0_rgba(255,255,255,0.2)] hover:translate-y-[1px] hover:border-b-[3px] active:translate-y-[4px] active:border-b-0 active:shadow-none transition-all cursor-pointer text-[15px] font-black uppercase tracking-wider text-center"
-              >
-                <Flame className="w-5 h-5 text-amber-300 animate-pulse shrink-0" />
-                <Upload className="w-4.5 h-4.5 text-white shrink-0" />
-                <span>{isUploading ? "Đang xử lý tải..." : "+ Tải lên tài liệu mới"}</span>
-              </button>
-            </div>
-            {/* Active upload list showing progress percentages */}
-            {Object.keys(uploadProgress).length > 0 && (
-              <div className="space-y-1.5 pt-2 border-t border-slate-205">
-                {Object.entries(uploadProgress).map(([filename, prg]) => (
-                  <div key={filename} className="text-[10px] bg-white border border-slate-200 rounded-lg p-2 animate-fade-in shadow-xs">
-                    <div className="flex justify-between text-[9px] mb-1 font-sans">
-                      <span className="text-slate-805 truncate max-w-[145px] font-bold" title={filename}>{filename}</span>
-                      <span className="text-brand-orange font-mono font-bold shrink-0">{prg}%</span>
-                    </div>
-                  </div>
-                ))}
+              <div className="relative">
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  accept=".pdf,.docx,.txt"
+                  multiple
+                  onChange={handleFileUpload}
+                  disabled={isUploading}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                  style={{ textShadow: "0 1px 2px rgba(0,0,0,0.2)" }}
+                  className="w-full flex items-center justify-center gap-2.5 py-3 px-4 bg-brand-orange hover:bg-brand-orange/95 text-white rounded-xl border-b-[4px] border-[#9E3600] shadow-[0_4px_12px_rgba(234,88,12,0.3),inset_0_1px_0_rgba(255,255,255,0.2)] hover:translate-y-[1px] hover:border-b-[3px] active:translate-y-[4px] active:border-b-0 active:shadow-none transition-all cursor-pointer text-[15px] font-black uppercase tracking-wider text-center"
+                >
+                  <Flame className="w-5 h-5 text-amber-300 animate-pulse shrink-0" />
+                  <Upload className="w-4.5 h-4.5 text-white shrink-0" />
+                  <span>{isUploading ? "Đang xử lý tải..." : "+ Tải lên tài liệu mới"}</span>
+                </button>
               </div>
-            )}
-          </div>
+              {/* Active upload list showing progress percentages */}
+              {Object.keys(uploadProgress).length > 0 && (
+                <div className="space-y-1.5 pt-2 border-t border-slate-205">
+                  {Object.entries(uploadProgress).map(([filename, prg]) => (
+                    <div key={filename} className="text-[10px] bg-white border border-slate-200 rounded-lg p-2 animate-fade-in shadow-xs">
+                      <div className="flex justify-between text-[9px] mb-1 font-sans">
+                        <span className="text-slate-805 truncate max-w-[145px] font-bold" title={filename}>{filename}</span>
+                        <span className="text-brand-orange font-mono font-bold shrink-0">{prg}%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 font-medium space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-slate-800">Cơ sở dữ liệu pháp quy</span>
+                <span className="text-[10px] font-bold uppercase bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded">Quyền: Nhân viên</span>
+              </div>
+              <p>Tài khoản nhân viên được tra cứu và tải tài liệu. Chỉ Quản trị viên (Admin) mới có quyền tải lên, xóa hoặc khôi phục cơ sở dữ liệu luật.</p>
+            </div>
+          )}
         </div>
 
         {/* SECTION 3: APPRAISAL SESSIONS HISTORY */}
@@ -1041,101 +1098,11 @@ export function Sidebar({
       </div>
 
       {/* Centered Document Quick-View Modal */}
-      {previewDoc && (
-        <div 
-          className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm flex items-center justify-center p-4 md:p-6 z-50 select-none animate-in fade-in duration-200"
-          onClick={() => setPreviewDoc(null)}
-        >
-          <div 
-            className="bg-white rounded-2xl w-full max-w-3xl max-h-[85vh] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.35)] flex flex-col overflow-hidden border border-slate-200/60 animate-in zoom-in-95 duration-200 text-black text-left"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="p-5 border-b border-slate-150 bg-slate-50 flex items-center justify-between shrink-0">
-              <div className="min-w-0 pr-4">
-                <span className="inline-block bg-brand-orange/10 text-brand-orange font-black font-mono text-[11px] rounded px-2.5 py-0.5 uppercase tracking-wide mb-1.5 border border-brand-orange/20">
-                  {previewDoc.type || "TÀI LIỆU"}
-                </span>
-                <h3 className="font-display font-black text-sm md:text-base text-black truncate" title={previewDoc.title}>
-                  [{previewDoc.code}] {previewDoc.title}
-                </h3>
-              </div>
-              <button
-                onClick={() => setPreviewDoc(null)}
-                className="text-slate-500 hover:text-black p-2 hover:bg-slate-200 rounded-xl transition-all cursor-pointer shrink-0 flex items-center justify-center"
-                title="Đóng bản xem trước"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5 text-sm font-sans select-text">
-              {/* Context Metadata GRID */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/80 border border-slate-200/80 rounded-xl p-4 text-[12.5px] font-sans">
-                <div className="flex flex-col gap-0.5 sm:border-r border-slate-200/65 pr-2">
-                  <span className="text-slate-500 font-medium">Ký hiệu pháp lý:</span>
-                  <span className="font-mono text-brand-orange font-black text-sm">{previewDoc.code}</span>
-                </div>
-                <div className="flex flex-col gap-0.5 sm:border-r border-slate-200/65 sm:px-2">
-                  <span className="text-slate-500 font-medium">Loại văn bản:</span>
-                  <span className="text-slate-900 font-black text-sm uppercase">{previewDoc.type}</span>
-                </div>
-                {previewDoc.uploadedAt ? (
-                  <div className="flex flex-col gap-0.5 sm:pl-2">
-                    <span className="text-slate-500 font-medium">Ngày cập nhật:</span>
-                    <span className="text-slate-800 font-bold">
-                      {new Date(previewDoc.uploadedAt).toLocaleDateString("vi-VN") + " " + new Date(previewDoc.uploadedAt).toLocaleTimeString("vi-VN", {hour: "2-digit", minute: "2-digit"})}
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex flex-col gap-0.5 sm:pl-2">
-                    <span className="text-slate-500 font-medium">Trạng thái xác thực:</span>
-                    <span className="text-emerald-600 font-bold flex items-center gap-1">Chính thức</span>
-                  </div>
-                )}
-              </div>
-
-              {/* Content preview heading */}
-              <div className="space-y-3 flex-1 flex flex-col min-h-0 text-left">
-                <div className="flex items-center gap-2 text-slate-850 bg-slate-100 p-2 rounded-lg border border-slate-200">
-                  <FileText className="w-4 h-4 text-brand-orange shrink-0" />
-                  <h4 className="text-[11px] uppercase font-black tracking-wider text-slate-950">Nội dung chi tiết - trích lục văn bản pháp luật:</h4>
-                </div>
-                <div className="bg-white border border-slate-200/80 rounded-xl p-4.5 text-slate-900 font-medium font-sans leading-relaxed text-[13px] whitespace-pre-wrap max-h-[380px] overflow-y-auto custom-scrollbar border-l-4 border-l-brand-orange shadow-inner text-left">
-                  {previewDoc.content || "Văn bản này hiện chưa có nội dung trích lục chi tiết."}
-                </div>
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="p-4 border-t border-slate-150 bg-slate-50 flex items-center justify-between text-[12px] text-slate-600 font-sans shrink-0">
-              <span className="font-bold text-slate-700 hidden sm:inline">Cơ sở dữ liệu pháp luật phòng cháy chữa cháy</span>
-              <div className="flex items-center gap-2.5 ml-auto sm:ml-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(`[${previewDoc.code}] ${previewDoc.title}\n\nNội dung:\n${previewDoc.content || ""}`);
-                    alert("Đã sao chép nội dung vào bộ nhớ tạm!");
-                  }}
-                  className="px-4 py-2 border border-slate-350 bg-white hover:bg-slate-100 rounded-xl text-slate-950 font-black tracking-wide uppercase text-[11px] cursor-pointer transition-all"
-                >
-                  Sao chép nội dung
-                </button>
-                <a 
-                  href="#"
-                  onClick={(e) => { e.preventDefault(); void downloadDocument(previewDoc); }}
-                  download
-                  className="flex items-center gap-1.5 px-4 py-2 bg-brand-orange hover:bg-brand-orange/95 text-white font-black tracking-wide uppercase text-[11px] rounded-xl transition-all cursor-pointer shadow-md shadow-brand-orange/15"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  Tải văn bản (PDF)
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <DocumentPreviewModal
+        previewDoc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        onDownload={downloadDocument}
+      />
 
 
 

@@ -1,6 +1,7 @@
 import React from "react";
 import { BlueprintUploadModal } from "../features/blueprint/components/BlueprintUploadModal";
 import { DocumentLibraryModal } from "../features/documents/components/DocumentLibraryModal";
+import { DocumentPreviewModal } from "./DocumentPreviewModal";
 import { InspectionLogPanel } from "./InspectionLogPanel";
 import { UserManagementModal } from "./UserManagementModal";
 import { AuthUser } from "../lib/api";
@@ -24,6 +25,8 @@ interface AppModalsProps {
   onCloseUserManagement: () => void;
   currentUser: AuthUser;
   onLogout: () => void;
+  citationDoc?: DocumentItem | null;
+  onCloseCitation?: () => void;
 }
 
 export const AppModals: React.FC<AppModalsProps> = ({
@@ -44,6 +47,8 @@ export const AppModals: React.FC<AppModalsProps> = ({
   onCloseUserManagement,
   currentUser,
   onLogout,
+  citationDoc,
+  onCloseCitation,
 }) => {
   return (
     <>
@@ -62,7 +67,17 @@ export const AppModals: React.FC<AppModalsProps> = ({
         onDeleteDocument={onDeleteDocument}
         onResetDocuments={onResetDocuments}
         onDownloadDocument={onDownloadDocument}
+        isAdmin={currentUser?.role === "admin"}
+        userRole={currentUser?.role}
       />
+      {/* Modal xem trước trực tiếp PDF luật khi bấm thẻ trích dẫn [Mã văn bản] trong chat (Ngày 4 kế hoạch) */}
+      {citationDoc && onCloseCitation && (
+        <DocumentPreviewModal
+          previewDoc={citationDoc}
+          onClose={onCloseCitation}
+          onDownload={onDownloadDocument}
+        />
+      )}
       {isInspectionLogOpen && (
         <InspectionLogPanel
           sessionId={sessionId}
@@ -79,4 +94,3 @@ export const AppModals: React.FC<AppModalsProps> = ({
     </>
   );
 };
-

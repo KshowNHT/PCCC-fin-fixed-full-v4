@@ -32,3 +32,10 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Test bundles
+tests/.*_out.cjs
+tests/fixtures.json
+test-results/
+playwright-report/
+

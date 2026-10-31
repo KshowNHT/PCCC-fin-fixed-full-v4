@@ -17,13 +17,14 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
   onApply,
 }) => {
   const {
-    file,
+    files,
     isDragging,
     isProcessing,
     error,
     coverageNotice,
     extractedData,
-    handleSelectFile,
+    handleSelectFiles,
+    handleRemoveFile,
     handleDragOver,
     handleDragLeave,
     handleDrop,
@@ -41,20 +42,29 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
               <ScanLine className="w-4.5 h-4.5" />
             </div>
             <div>
-              <h3 className="font-bold text-sm text-slate-900">Bóc tách Bản vẽ Kỹ thuật (OCR / Vision AI)</h3>
-              <p className="text-[11px] text-slate-500">Đọc tự động thông số từ bản vẽ PDF hoặc ảnh kiến trúc</p>
+              <h3 className="font-bold text-sm text-slate-900">
+                Bóc tách Bản vẽ Kỹ thuật đa tệp (Multi-file OCR)
+              </h3>
+              <p className="text-[11px] text-slate-500">
+                Đọc cùng lúc tối đa 5 bản vẽ PDF hoặc ảnh kiến trúc bằng Gemini Vision
+              </p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer">
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
+          >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         <div className="p-6 space-y-4 overflow-y-auto flex-1 custom-scrollbar">
           <DrawingDropzone
-            file={file}
+            files={files}
             isDragging={isDragging}
-            onSelectFile={handleSelectFile}
+            onSelectFiles={handleSelectFiles}
+            onRemoveFile={handleRemoveFile}
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
@@ -69,7 +79,10 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
           )}
 
           {extractedData && (
-            <ExtractionPreview extracted={extractedData} coverageNotice={coverageNotice} />
+            <ExtractionPreview
+              extracted={extractedData}
+              coverageNotice={coverageNotice}
+            />
           )}
         </div>
 
@@ -82,7 +95,7 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
                 disabled={isProcessing}
                 className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-200/60 rounded-xl transition-all cursor-pointer"
               >
-                Tải file khác
+                Tải lại / Thêm file khác
               </button>
               <button
                 type="button"
@@ -90,7 +103,11 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
                 disabled={isProcessing}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-all cursor-pointer"
               >
-                {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {isProcessing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="w-3.5 h-3.5" />
+                )}
                 <span>Áp dụng vào hồ sơ dự án</span>
               </button>
             </>
@@ -106,11 +123,21 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
               <button
                 type="button"
                 onClick={handleExtract}
-                disabled={!file || isProcessing}
+                disabled={files.length === 0 || isProcessing}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-brand-orange hover:bg-orange-600 disabled:bg-slate-200 text-white text-xs font-bold shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
               >
-                {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ScanLine className="w-3.5 h-3.5" />}
-                <span>{isProcessing ? "AI đang đọc bản vẽ..." : "Bắt đầu bóc tách"}</span>
+                {isProcessing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <ScanLine className="w-3.5 h-3.5" />
+                )}
+                <span>
+                  {isProcessing
+                    ? "AI đang đọc các trang bản vẽ..."
+                    : files.length > 1
+                    ? `Bóc tách ${files.length} bản vẽ`
+                    : "Bắt đầu bóc tách"}
+                </span>
               </button>
             </>
           )}
@@ -119,4 +146,3 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
     </div>
   );
 };
-

@@ -23,7 +23,11 @@ from app.config import (
 from app.db import init_db
 from app.gemini_client import run_deep_llm_appraisal
 from app.limiter import limiter
-from app.ocr_vision import OCRInputError, extract_project_data_from_drawing
+from app.ocr_vision import (
+    OCRInputError,
+    extract_project_data_from_drawing,
+    extract_project_data_from_multiple_drawings,
+)
 from app.routers import auth, chat, documents, health, inspection_logs, ocr, reports, sessions
 from app.rules_engine import DETERMINISTIC_WARNING_PREFIXES, evaluate_appraisal
 from app.seed import seed_initial_data
@@ -55,13 +59,13 @@ from app.utils_file import (
 __all__ = [
     "app", "limiter", "LEGAL_DB_DIR", "UPLOADS_DIR", "DRAWINGS_DIR", "NODE_ENV",
     "MAX_STAFF_ACCOUNTS", "MAX_UPLOAD_SIZE_BYTES", "MAX_UPLOAD_SIZE_MB",
-    "extract_project_data_from_drawing", "OCRInputError", "run_deep_llm_appraisal",
-    "evaluate_appraisal", "DETERMINISTIC_WARNING_PREFIXES", "DEFAULT_PROJECT",
-    "_now_iso", "_safe_filename", "_generate_safe_storage_path",
-    "_read_upload_with_size_limit", "_extract_snippet", "_load_session_full",
-    "_session_revision", "_check_revision", "_project_fingerprint", "_is_reviewed",
-    "_clear_review", "_session_to_dict", "_owner_filter", "_user_grounding_text",
-    "_apply_ai_outputs", "_merge_checklist", "_log_inspection",
+    "extract_project_data_from_drawing", "extract_project_data_from_multiple_drawings",
+    "OCRInputError", "run_deep_llm_appraisal", "evaluate_appraisal",
+    "DETERMINISTIC_WARNING_PREFIXES", "DEFAULT_PROJECT", "_now_iso", "_safe_filename",
+    "_generate_safe_storage_path", "_read_upload_with_size_limit", "_extract_snippet",
+    "_load_session_full", "_session_revision", "_check_revision", "_project_fingerprint",
+    "_is_reviewed", "_clear_review", "_session_to_dict", "_owner_filter",
+    "_user_grounding_text", "_apply_ai_outputs", "_merge_checklist", "_log_inspection",
 ]
 
 logging.basicConfig(level=logging.INFO)

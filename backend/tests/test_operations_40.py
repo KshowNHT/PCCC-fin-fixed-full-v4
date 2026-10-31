@@ -623,6 +623,71 @@ class Operations40(unittest.TestCase):
         self.assertIn("[QCVN 06", reply_text)
         self.assertIn("[147/2020/TT-BCA]", reply_text)
 
+    def test_S35_inspection_log_detail_expanded_with_basis_and_warnings(self):
+        # Ngày 5: Kiểm tra lưu và mở rộng chi tiết log thẩm định (kết luận, căn cứ pháp lý, cảnh báo)
+        sid = self.session(project={"type": "Nhà ở kết hợp kinh doanh", "floors": 4, "totalFloorArea": 400, "height": 14}, reviewed=True)
+        r = self.client.get(f"/api/sessions/{sid}/inspection-logs", headers=self.staffa)
+        self.assertEqual(r.status_code, 200, r.text)
+        logs = r.json()
+        self.assertGreater(len(logs), 0)
+        first_log = logs[0]
+        self.assertIn("appraisalReason", first_log)
+        self.assertIn("checklist", first_log)
+        self.assertIn("warnings", first_log)
+        self.assertIn("appraisalBasis", first_log)
+
+        # Kiểm tra API chi tiết theo ID
+        log_id = first_log["id"]
+        detail_r = self.client.get(f"/api/inspection-logs/{log_id}", headers=self.staffa)
+        self.assertEqual(detail_r.status_code, 200, detail_r.text)
+        detail = detail_r.json()
+        self.assertEqual(detail["id"], log_id)
+        self.assertIn("checklist", detail)
+        self.assertIn("warnings", detail)
+
+    def test_S36_multi_drawing_ocr_upload_up_to_5_files(self):
+        # Ngày 6-7: Kiểm tra tải cùng lúc nhiều file bản vẽ (tối đa 5 file)
+        sid = self.session()
+        # 1. Thử gửi 6 file vượt giới hạn -> Phải nhận HTTP 400
+        fake_files_6 = [("files", (f"drawing_{i}.png", png(), "image/png")) for i in range(6)]
+        r_exceed = self.client.post("/api/ocr/extract-drawing", headers=self.staffa, data={"session_id": sid}, files=fake_files_6)
+        self.assertEqual(r_exceed.status_code, 400)
+        self.assertIn("tối đa 5 file", r_exceed.text)
+
+        # 2. Thử gửi 2 file hợp lệ với mock OCR
+        fake_files_2 = [
+            ("files", ("ground_floor.png", png(), "image/png")),
+            ("files", ("elevation_cut.png", png(), "image/png")),
+        ]
+        mock_result = {
+            "name": "Nhà hỗn hợp PCCC",
+            "type": "Nhà ở kết hợp kinh doanh",
+            "floors": 4,
+            "height": 14.5,
+            "totalFloorArea": 500,
+            "components": [{
+                "id": "b1",
+                "name": "Khối nhà A",
+                "type": "Nhà hỗn hợp",
+                "floors": 4,
+                "height": 14.5,
+                "totalFloorArea": 500,
+                "floorArea": 125,
+                "pcccHeight": 14.0,
+                "sourcePages": [1, 2],
+                "sourceText": "Quy mô 4 tầng, diện tích 500m2",
+            }],
+            "_ocrCoverage": {"filesRead": 2, "pagesRead": 2, "completePageCoverage": True}
+        }
+        with patch.object(main, "extract_project_data_from_multiple_drawings", AsyncMock(return_value=mock_result)):
+            r_ok = self.client.post("/api/ocr/extract-drawing", headers=self.staffa, data={"session_id": sid}, files=fake_files_2)
+            self.assertEqual(r_ok.status_code, 200, r_ok.text)
+            resp = r_ok.json()
+            self.assertIn("extractedProjectInfo", resp)
+            self.assertEqual(resp["extractedProjectInfo"]["name"], "Nhà hỗn hợp PCCC")
+            self.assertEqual(resp["extractedProjectInfo"]["components"][0]["floors"], 4)
+
+
 
 
 if __name__ == "__main__":

@@ -232,6 +232,11 @@ class InspectionLog(Base):
         compliant = sum(1 for c in (self.checklist_snapshot or []) if c.get("result") == "Đạt")
         first_result = (self.checklist_snapshot[0].get("result") if self.checklist_snapshot else None)
         status = {"Thuộc diện thẩm định": "required", "Dưới ngưỡng danh mục": "not_required"}.get(first_result, "insufficient_data")
+        basis = None
+        for item in (self.checklist_snapshot or []):
+            if isinstance(item, dict) and item.get("reviewedBasis"):
+                basis = item.get("reviewedBasis")
+                break
         return {
             "id": self.id,
             "sessionId": self.session_id,
@@ -239,6 +244,7 @@ class InspectionLog(Base):
             "isSubjectToAppraisal": self.is_subject_to_appraisal,
             "appraisalReason": self.appraisal_reason,
             "appraisalStatus": status,
+            "appraisalBasis": basis,
             "checklist": self.checklist_snapshot,
             "warnings": self.warnings,
             "compliantCount": compliant,

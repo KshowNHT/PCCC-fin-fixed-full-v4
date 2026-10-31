@@ -2,7 +2,7 @@
 import logging
 import sys
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
@@ -16,7 +16,11 @@ from app.db import get_db
 from app.db_models import ProjectData, User
 from app.hardening import lock_session, validate_upload
 from app.limiter import limiter
-from app.ocr_vision import OCRInputError, extract_project_data_from_drawing
+from app.ocr_vision import (
+    OCRInputError,
+    extract_project_data_from_drawing,
+    extract_project_data_from_multiple_drawings,
+)
 from app.schemas_project import ProjectUpdateRequest
 from app.services.session_service import (
     _check_revision,
@@ -38,15 +42,28 @@ router = APIRouter(prefix="/api/ocr", tags=["ocr"])
 @limiter.limit("15/minute")
 async def ocr_extract_drawing(
     request: Request,
-    file: UploadFile = File(...),
+    files: Optional[List[UploadFile]] = File(None),
+    file: Optional[UploadFile] = File(None),
     session_id: Optional[str] = Form(None),
     apply_to_session: bool = Form(False),
     expected_revision: Optional[str] = Header(None, alias="If-Match"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Preview OCR by default. Explicit apply_to_session=true opts into a
+    """Bóc tách bản vẽ kỹ thuật AI (hỗ trợ đọc đồng thời tối đa 5 file ảnh/PDF).
+    Preview OCR by default. Explicit apply_to_session=true opts into a
     validated atomic write; the UI saves only after the user confirms."""
+    upload_list: List[UploadFile] = []
+    if files:
+        upload_list.extend(files)
+    if file and file not in upload_list:
+        upload_list.append(file)
+
+    if not upload_list:
+        raise HTTPException(status_code=400, detail="Vui lòng chọn ít nhất một file bản vẽ (ảnh hoặc PDF).")
+    if len(upload_list) > 5:
+        raise HTTPException(status_code=400, detail="Chỉ cho phép tải lên tối đa 5 file bản vẽ cùng lúc.")
+
     session = None
     if session_id:
         await lock_session(db, session_id)
@@ -58,14 +75,27 @@ async def ocr_extract_drawing(
         if apply_to_session:
             _check_revision(session, expected_revision)
 
-    dest_path, _ = _generate_safe_storage_path(DRAWINGS_DIR, file.filename or "drawing", ALLOWED_DRAWING_EXTENSIONS)
-    content = await _read_upload_with_size_limit(file)
-    await run_in_threadpool(validate_upload, content, dest_path.suffix)
+    dest_paths = []
+    written_paths = []
+    for f in upload_list:
+        p, _ = _generate_safe_storage_path(DRAWINGS_DIR, f.filename or "drawing", ALLOWED_DRAWING_EXTENSIONS)
+        dest_paths.append((p, f))
+
     try:
-        await run_in_threadpool(dest_path.write_bytes, content)
+        for p, f in dest_paths:
+            content = await _read_upload_with_size_limit(f)
+            await run_in_threadpool(validate_upload, content, p.suffix)
+            await run_in_threadpool(p.write_bytes, content)
+            written_paths.append(p)
+
         main_mod = sys.modules.get("app.main")
-        ocr_fn = getattr(main_mod, "extract_project_data_from_drawing", extract_project_data_from_drawing) if main_mod else extract_project_data_from_drawing
-        extracted = await ocr_fn(str(dest_path), "")
+        if len(written_paths) == 1:
+            ocr_fn = getattr(main_mod, "extract_project_data_from_drawing", extract_project_data_from_drawing) if main_mod else extract_project_data_from_drawing
+            extracted = await ocr_fn(str(written_paths[0]), "")
+        else:
+            multi_fn = getattr(main_mod, "extract_project_data_from_multiple_drawings", extract_project_data_from_multiple_drawings) if main_mod else extract_project_data_from_multiple_drawings
+            extracted = await multi_fn([str(p) for p in written_paths], [p.suffix for p in written_paths])
+
         if not isinstance(extracted, dict):
             raise ValueError("OCR output must be an object")
         current = session.project_data.to_dict() if session and session.project_data else {}
@@ -130,4 +160,5 @@ async def ocr_extract_drawing(
         logger.exception("OCR không thành công")
         raise HTTPException(status_code=502, detail="Dịch vụ OCR không sẵn sàng. Bạn có thể nhập thông số thủ công.")
     finally:
-        dest_path.unlink(missing_ok=True)
+        for p in written_paths:
+            p.unlink(missing_ok=True)

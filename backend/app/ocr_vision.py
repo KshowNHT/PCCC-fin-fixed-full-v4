@@ -130,37 +130,75 @@ async def _call_vision_model(images: List[bytes]) -> Dict[str, Any]:
         return json.loads(cleaned)
 
 
-async def extract_project_data_from_drawing(file_path: str, content_type: str = "") -> Dict[str, Any]:
-    """Pipeline OCR đầy đủ: PDF/ảnh bản vẽ -> ảnh hoá -> Gemini Vision -> ProjectData dict.
-
-    Trả về dict theo đúng field names của ProjectInfo/ProjectData (camelCase)
-    để frontend autofill trực tiếp vào form, đúng yêu cầu Ngày 15-17:
-    'Cập nhật UI Form để hiển thị dữ liệu do AI tự động bóc tách (Autofill)'.
+async def extract_project_data_from_multiple_drawings(
+    file_paths: List[str],
+    content_types: Optional[List[str]] = None,
+    max_total_pages: int = 24,
+) -> Dict[str, Any]:
+    """Pipeline OCR đa bản vẽ (Ngày 6-7 kế hoạch):
+    Cho phép nhận tối đa 5 file ảnh/PDF bản vẽ, bóc tách tất cả các trang,
+    gửi qua Gemini Vision và gộp thông số thành ProjectData dict hoàn chỉnh.
     """
-    images = await asyncio.to_thread(_load_images_from_upload, file_path, content_type)
-    if not images:
-        raise ValueError("Không đọc được trang nào từ file bản vẽ đã upload.")
+    if not file_paths:
+        raise ValueError("Chưa có file bản vẽ nào được cung cấp.")
+    if len(file_paths) > 5:
+        raise OCRInputError("Chỉ cho phép tải lên tối đa 5 file bản vẽ cùng lúc.")
+
+    all_images: List[bytes] = []
+    file_page_map: List[Dict[str, Any]] = []
+
+    for idx, fpath in enumerate(file_paths):
+        ctype = content_types[idx] if content_types and idx < len(content_types) else ""
+        imgs = await asyncio.to_thread(_load_images_from_upload, fpath, ctype)
+        if not imgs:
+            continue
+        start_page = len(all_images) + 1
+        all_images.extend(imgs)
+        end_page = len(all_images)
+        file_page_map.append({
+            "fileName": Path(fpath).name,
+            "pageCount": len(imgs),
+            "pageRange": [start_page, end_page],
+        })
+        if len(all_images) > max_total_pages:
+            raise OCRInputError(
+                f"Tổng số trang bản vẽ ({len(all_images)} trang) vượt quá giới hạn xử lý tối đa ({max_total_pages} trang). "
+                "Vui lòng chỉ tải các trang chứa mặt bằng, mặt cắt và khung tên chính."
+            )
+
+    if not all_images:
+        raise ValueError("Không đọc được trang nào từ các file bản vẽ đã upload.")
 
     try:
-        extracted = await _call_vision_model(images)
+        extracted = await _call_vision_model(all_images)
     except Exception as err:  # noqa: BLE001
-        logger.error("Lỗi trích xuất OCR bản vẽ: %s", err)
+        logger.error("Lỗi trích xuất OCR đa bản vẽ: %s", err)
         raise
 
-    # Fail closed on an incomplete schema, before returning a preview or writing data.
     from pydantic import ValidationError
     try:
         extracted = ExtractedProjectInfo.model_validate(extracted).model_dump(exclude_none=True)
     except ValidationError as exc:
-        raise OCRInputError("OCR chưa tách được danh sách hạng mục hợp lệ. Không áp dụng hồ sơ thiếu; hãy thử lại hoặc nhập tay từng nhà.") from exc
-    if not extracted["components"]:
-        raise OCRInputError("Không đọc được hạng mục độc lập nào. Không tự gộp công trình hoặc suy đoán số liệu.")
+        raise OCRInputError("OCR chưa tách được danh sách hạng mục hợp lệ từ các bản vẽ. Vui lòng kiểm tra lại độ nét hoặc nhập tay.") from exc
+
+    if not extracted.get("components"):
+        raise OCRInputError("Không đọc được hạng mục công trình nào từ các bản vẽ. Vui lòng tải bản vẽ có khung tên và mặt bằng rõ ràng.")
+
     for building in extracted["components"]:
-        if not building["sourcePages"] or not building["sourceText"].strip() or any(page > len(images) for page in building["sourcePages"]):
+        if not building.get("sourcePages") or not building.get("sourceText", "").strip() or any(p > len(all_images) for p in building["sourcePages"]):
             raise OCRInputError("Hạng mục OCR thiếu trang nguồn hoặc dòng số liệu để đối chiếu. Không áp dụng dữ liệu chưa rõ nguồn.")
 
-    # Loại bỏ key rỗng/None để không ghi đè dữ liệu đã có bằng giá trị rỗng
     result = {k: v for k, v in extracted.items() if v not in (None, "", [])}
-    result["_ocrCoverage"] = {"pagesRead": len(images), "completePageCoverage": True,
-                              "notice": "Đã gửi tất cả trang trong giới hạn; người dùng phải đối chiếu số lượng hạng mục và số liệu trước khi kiểm duyệt."}
+    result["_ocrCoverage"] = {
+        "filesRead": len(file_paths),
+        "pagesRead": len(all_images),
+        "completePageCoverage": True,
+        "fileMap": file_page_map,
+        "notice": f"Đã bóc tách thành công từ {len(file_paths)} file ({len(all_images)} trang bản vẽ). Kỹ sư cần đối chiếu số liệu trước khi phê duyệt.",
+    }
     return result
+
+
+async def extract_project_data_from_drawing(file_path: str, content_type: str = "") -> Dict[str, Any]:
+    """Pipeline OCR đơn bản vẽ: tương thích ngược 100% với các test và lệnh gọi hiện tại."""
+    return await extract_project_data_from_multiple_drawings([file_path], [content_type] if content_type else None)

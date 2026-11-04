@@ -60,7 +60,8 @@ export function Login({ onLogin }: LoginProps) {
                   type="text"
                   name="username"
                   id="login-username"
-                  className="focus:ring-brand-blue focus:border-brand-blue block w-full pl-10 sm:text-sm border-slate-300 rounded-md py-2 px-3 border outline-none"
+                  style={{ color: "#0f172a" }}
+                  className="focus:ring-brand-blue focus:border-brand-blue block w-full pl-10 sm:text-sm border-slate-300 rounded-md py-2 px-3 border outline-none bg-white text-slate-900 placeholder:text-slate-400 font-sans"
                   placeholder="Tên đăng nhập"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
@@ -92,7 +93,8 @@ export function Login({ onLogin }: LoginProps) {
                   type={showPassword ? "text" : "password"}
                   name="password"
                   id="login-password"
-                  className="focus:ring-brand-blue focus:border-brand-blue block w-full pl-10 pr-10 sm:text-sm border-slate-300 rounded-md py-2 px-3 border outline-none"
+                  style={{ color: "#0f172a" }}
+                  className="focus:ring-brand-blue focus:border-brand-blue block w-full pl-10 pr-10 sm:text-sm border-slate-300 rounded-md py-2 px-3 border outline-none bg-white text-slate-900 placeholder:text-slate-400 font-sans"
                   placeholder="Mật khẩu"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -103,7 +105,7 @@ export function Login({ onLogin }: LoginProps) {
                 <button
                   type="button"
                   onClick={() => setShowPassword((v) => !v)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600"
+                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-800 cursor-pointer"
                   title={showPassword ? "Ẩn mật khẩu" : "Hiện mật khẩu"}
                   tabIndex={-1}
                 >

@@ -40,9 +40,7 @@ export const DrawingDropzone: React.FC<DrawingDropzoneProps> = ({
         accept=".pdf,.png,.jpg,.jpeg,.webp"
         className="hidden"
         onChange={(e) => {
-          if (e.target.files) {
-            onSelectFiles(e.target.files);
-          }
+          if (e.target.files) onSelectFiles(e.target.files);
           e.target.value = "";
         }}
         disabled={disabled}
@@ -53,9 +51,7 @@ export const DrawingDropzone: React.FC<DrawingDropzoneProps> = ({
           <div className="flex items-center justify-between px-1">
             <span className="text-xs font-semibold text-slate-700">
               Danh sách bản vẽ đã chọn:{" "}
-              <span className="text-brand-orange font-bold font-mono">
-                {files.length}/5
-              </span>
+              <span className="text-brand-orange font-bold font-mono">{files.length}/5</span>
             </span>
             {files.length < 5 && !disabled && (
               <button
@@ -72,27 +68,19 @@ export const DrawingDropzone: React.FC<DrawingDropzoneProps> = ({
           <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-0.5">
             {files.map((file, idx) => (
               <div
-                key={`${file.name}-${idx}`}
+                key={`${file.name}-${file.size}-${file.lastModified}`}
                 className="flex items-center justify-between p-2.5 bg-orange-50/50 hover:bg-orange-50 border border-orange-200/80 rounded-xl transition-colors"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div
                     className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                      isPdf(file.name)
-                        ? "bg-red-500 text-white"
-                        : "bg-brand-orange text-white"
+                      isPdf(file.name) ? "bg-red-500 text-white" : "bg-brand-orange text-white"
                     } shadow-xs`}
                   >
-                    {isPdf(file.name) ? (
-                      <FileText className="w-4 h-4" />
-                    ) : (
-                      <Image className="w-4 h-4" />
-                    )}
+                    {isPdf(file.name) ? <FileText className="w-4 h-4" /> : <Image className="w-4 h-4" />}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold text-slate-800 truncate">
-                      {file.name}
-                    </p>
+                    <p className="text-xs font-semibold text-slate-800 truncate">{file.name}</p>
                     <p className="text-[10px] text-slate-500 font-mono">
                       {formatSize(file.size)} &bull; {isPdf(file.name) ? "PDF" : "Hình ảnh"}
                     </p>
@@ -119,9 +107,7 @@ export const DrawingDropzone: React.FC<DrawingDropzoneProps> = ({
               onDrop={onDrop}
               onClick={() => inputRef.current?.click()}
               className={`border border-dashed rounded-xl p-3 text-center cursor-pointer transition-all ${
-                isDragging
-                  ? "border-brand-orange bg-orange-50"
-                  : "border-slate-300 hover:border-brand-orange hover:bg-slate-50"
+                isDragging ? "border-brand-orange bg-orange-50" : "border-slate-300 hover:border-brand-orange hover:bg-slate-50"
               }`}
             >
               <p className="text-xs text-slate-600">
@@ -137,17 +123,14 @@ export const DrawingDropzone: React.FC<DrawingDropzoneProps> = ({
           onDrop={onDrop}
           onClick={() => inputRef.current?.click()}
           className={`border-2 border-dashed rounded-2xl p-6 text-center cursor-pointer transition-all ${
-            isDragging
-              ? "border-brand-orange bg-orange-50/70 scale-[1.01]"
-              : "border-slate-200 hover:border-brand-orange/60 hover:bg-slate-50/70"
+            isDragging ? "border-brand-orange bg-orange-50/70 scale-[1.01]" : "border-slate-200 hover:border-brand-orange/60 hover:bg-slate-50/70"
           }`}
         >
           <div className="w-12 h-12 rounded-xl bg-orange-100 text-brand-orange flex items-center justify-center mx-auto mb-3 shadow-xs">
             <UploadCloud className="w-6 h-6" />
           </div>
           <p className="text-sm font-semibold text-slate-700">
-            Kéo thả cùng lúc tối đa 5 file bản vẽ vào đây, hoặc{" "}
-            <span className="text-brand-orange underline">chọn từ máy tính</span>
+            Kéo thả cùng lúc tối đa 5 file bản vẽ vào đây, hoặc <span className="text-brand-orange underline">chọn từ máy tính</span>
           </p>
           <p className="text-xs text-slate-400 mt-1">
             Hỗ trợ định dạng PDF (khung tên, mặt bằng, kết cấu) hoặc ảnh PNG, JPG, WEBP (tối đa 25MB/file)

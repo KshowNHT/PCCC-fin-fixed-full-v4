@@ -1,11 +1,11 @@
 @echo off
 setlocal
-title PCCC Docker - Start
+title PCCC Docker - Start (Local 1-Click)
 
 cd /d "%~dp0"
 
 echo ================================================
-echo     PCCC APPLICATION - DOCKER START
+echo     PCCC APPLICATION - DOCKER 1-CLICK START
 echo ================================================
 echo.
 
@@ -25,50 +25,45 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if not exist "compose.yaml" (
-    echo [ERROR] compose.yaml was not found next to this file.
+if not exist "compose.local.yaml" (
+    echo [ERROR] compose.local.yaml was not found next to this file.
     pause
     exit /b 1
 )
 
 if not exist ".env" (
-    if exist ".env.example" (
-        copy /Y ".env.example" ".env" >nul
-        echo [INFO] Created .env from .env.example
-        echo [INFO] For AI features, add GEMINI_API_KEY to .env.
-        echo [WARNING] Before real use: also change JWT_SECRET and
-        echo [WARNING] PCCC_ADMIN_PASSWORD in .env - the backend will
-        echo [WARNING] REFUSE TO START with the default values shipped
-        echo [WARNING] in .env.example (this is intentional, for safety).
+    if not exist "backend\.env" (
+        echo [INFO] Using built-in local defaults (Admin: admin / admin123).
+        echo [INFO] For AI features, add GEMINI_API_KEY to backend/.env or .env.
         echo.
     )
 )
 
-echo [1/4] Validating compose.yaml...
-docker compose config >nul
+echo [1/4] Validating compose.local.yaml...
+docker compose -f compose.local.yaml config >nul
 if errorlevel 1 (
-    echo [ERROR] Invalid compose.yaml.
-    docker compose config
+    echo [ERROR] Invalid compose.local.yaml.
+    docker compose -f compose.local.yaml config
     pause
     exit /b 1
 )
 
 echo [2/4] Building and starting PostgreSQL, backend and frontend...
-docker compose up -d --build
+docker compose -f compose.local.yaml up -d --build
 if errorlevel 1 (
     echo [ERROR] Docker Compose failed.
-    docker compose logs --tail=100
+    docker compose -f compose.local.yaml logs --tail=100
     pause
     exit /b 1
 )
 
 echo [3/4] Current container status:
-docker compose ps
+docker compose -f compose.local.yaml ps
 echo.
 
 echo [4/4] Waiting briefly for services...
 timeout /t 5 /nobreak >nul
-docker compose ps
+docker compose -f compose.local.yaml ps
 echo.
 
 echo ================================================
@@ -78,8 +73,9 @@ echo Frontend : http://localhost:5173
 echo Backend  : http://localhost:8000
 echo API Docs : http://localhost:8000/docs
 echo Health   : http://localhost:8000/api/health
+echo Default Admin Login: admin / admin123 (unless customized in .env)
 echo.
-echo If something fails, run: docker compose logs -f
+echo If something fails, run: docker compose -f compose.local.yaml logs -f
 echo.
 
 start "" "http://localhost:5173"

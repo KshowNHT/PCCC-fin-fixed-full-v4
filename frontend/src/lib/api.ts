@@ -3,8 +3,8 @@
 // focus / storage) và thu hồi token trên server khi logout.
 
 const API_BASE_URL = (
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_API_URL ||
+  import.meta.env?.VITE_API_BASE_URL ||
+  import.meta.env?.VITE_API_URL ||
   ""
 ).replace(/\/$/, "");
 export const apiUrl = (path: string) =>

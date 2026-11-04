@@ -1,10 +1,12 @@
 import "./jsdom_setup";
 import fs from "fs";
+import path from "path";
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MainArea } from "../src/components/MainArea";
 import { resolveStatus, verdictHeading } from "../src/components/LegalBasisPanel";
-const fixtures = JSON.parse(fs.readFileSync(require("path").join(__dirname,"fixtures.json"),"utf-8"));
+const fixturesPath = typeof __dirname !== "undefined" ? path.join(__dirname, "fixtures.json") : path.resolve(process.cwd(), "tests", "fixtures.json");
+const fixtures = JSON.parse(fs.readFileSync(fixturesPath, "utf-8"));
 const noop = () => {};
 function assert(value: unknown, message: string) { if (!value) throw new Error(message); }
 (async () => {
@@ -18,7 +20,13 @@ function assert(value: unknown, message: string) { if (!value) throw new Error(m
       projectInfo={{name:"QA",basements:0,location:"",investor:"",designer:"",stage:"",length:0,width:0,height:0,commercialDetails:"",...fx.project}}
       onExportReport={noop} isExporting={false} onExportReportPdf={noop} isExportingPdf={false}
       isSidebarOpen={false} onToggleSidebar={noop}/>);});
-    assert(document.body.textContent?.includes("Chưa có hạng mục được xác nhận"),name+": no false compliance percentage");
+    const expectedConfirmed = fx.checklist.filter((item: any) => item.result === "Đạt" || item.result === "Không bắt buộc").length;
+    assert(
+      expectedConfirmed === 0
+        ? document.body.textContent?.includes("Chưa có hạng mục được xác nhận")
+        : document.body.textContent?.includes(`${expectedConfirmed}/${fx.checklist.length} đã xác nhận`) && !document.body.textContent?.includes("hạng mục đạt"),
+      name+": no false compliance percentage"
+    );
     const btn=Array.from(document.querySelectorAll("button")).find(b=>b.textContent?.includes("Kết luận Pháp lý PCCC"));
     assert(btn,name+": verdict navigation");
     await act(async()=>{(btn as HTMLElement).click();});

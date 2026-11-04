@@ -30,4 +30,6 @@ for key, proj in CASES.items():
 target = os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "tests", "fixtures.json")
 with open(target, "w", encoding="utf-8") as f:
     json.dump(out, f, ensure_ascii=False)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 print("Đã sinh", len(out), "fixture ->", os.path.normpath(target))

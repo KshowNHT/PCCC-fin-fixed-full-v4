@@ -139,6 +139,8 @@ def generate_pccc_report(
         "Tổng diện tích sàn",
         f"~{total_floor_area} m² ({floors} tầng nổi × {project.get('floorArea', 0)} m²)" if total_floor_area else "Chưa cập nhật",
     )
+    _volume_val = project.get("volume") or 0
+    _input_row(input_table, "Khối tích công trình", f"{_volume_val} m³" if _volume_val else "Chưa cập nhật")
     _input_row(input_table, "Quy mô tầng", f"{floors} tầng nổi, {project.get('basements', 0)} tầng hầm")
     _input_row(input_table, "Chiều cao công trình (H)", f"{project.get('height', 0)} m" if project.get("height") else "Chưa cập nhật")
     _input_row(input_table, "Chiều cao PCCC", f"{project.get('pcccHeight') or project.get('height', 0)} m" if (project.get("pcccHeight") or project.get("height")) else "Chưa cập nhật")

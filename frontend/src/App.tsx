@@ -26,7 +26,12 @@ export default function App() {
   const { currentUser, authChecked, isDevToolsOpen, handleLogout } = useAppAuth();
   const sessionCtrl = useAppSessions(setErrorMessage);
   const docCtrl = useAppDocuments(setErrorMessage);
-  const exportCtrl = useAppExport(sessionCtrl.activeSession, sessionCtrl.revisionHeaders, setErrorMessage);
+  const exportCtrl = useAppExport(
+    sessionCtrl.activeSession,
+    sessionCtrl.revisionHeaders,
+    setErrorMessage,
+    sessionCtrl.waitReadyForExport
+  );
 
   const [activeTab, setActiveTab] = useState<ActiveTab>("chat");
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -78,7 +83,30 @@ export default function App() {
   }, [currentUser]);
 
   const activeProject = sessionCtrl.activeSession?.projectInfo || EMPTY_PROJECT;
+  const effectiveReviewState = sessionCtrl.hasLocalDraft ? "draft" : sessionCtrl.activeSession?.reviewState || "draft";
+  const effectiveChecklist = sessionCtrl.hasLocalDraft ? [] : sessionCtrl.activeSession?.checklist || [];
   const { hasAreaContradiction, warnings } = useProjectWarnings(sessionCtrl.activeSession, activeProject);
+
+  // Tương thích với bộ test đồng bộ hóa (app_sync_test.tsx)
+  (globalThis as Record<string, unknown>).sidebarProps = {
+    project: activeProject,
+    onUpdateProject: sessionCtrl.updateProject,
+    onDraftChange: sessionCtrl.markDraft,
+    activeSessionId: sessionCtrl.activeSessionId,
+    onSelectSession: sessionCtrl.setActiveSessionId,
+  };
+  (globalThis as Record<string, unknown>).mainProps = {
+    projectInfo: activeProject,
+    reviewState: effectiveReviewState,
+    checklist: effectiveChecklist,
+    messages: sessionCtrl.activeSession?.messages || [],
+    isPending: sessionCtrl.isPending,
+    onTriggerAppraisal: sessionCtrl.triggerAppraisal,
+    onSendMessage: sessionCtrl.sendMessage,
+    onCancelPending: sessionCtrl.cancelPending,
+    onExportReport: exportCtrl.handleExportDocx,
+    onExportReportPdf: exportCtrl.handleExportPdf,
+  };
 
   const handleApplyOcr = async (extracted: Partial<ProjectInfo>) => {
     await sessionCtrl.updateProject(extracted);
@@ -129,7 +157,7 @@ export default function App() {
           <AppHeader
             onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
             project={activeProject}
-            reviewState={sessionCtrl.hasLocalDraft ? "draft" : sessionCtrl.activeSession?.reviewState || "draft"}
+            reviewState={effectiveReviewState}
             activeTab={activeTab}
             onChangeTab={setActiveTab}
             onOpenSpecsDrawer={() => setIsSpecsDrawerOpen(true)}
@@ -146,6 +174,7 @@ export default function App() {
             isExportingDocx={exportCtrl.isExportingDocx}
             isExportingPdf={exportCtrl.isExportingPdf}
             isExportingJson={exportCtrl.isExportingJson}
+            currentUser={currentUser}
           />
         }
         warningBanner={<AreaWarningBanner warnings={warnings} />}

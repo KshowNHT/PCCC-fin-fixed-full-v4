@@ -50,6 +50,8 @@ interface MainAreaProps {
   isExporting: boolean;
   onExportReportPdf: () => void;
   isExportingPdf: boolean;
+  onExportReportJson?: () => void;
+  isExportingJson?: boolean;
   isSidebarOpen: boolean;
   onToggleSidebar: () => void;
 }
@@ -87,6 +89,8 @@ export function MainArea({
   isExporting,
   onExportReportPdf,
   isExportingPdf,
+  onExportReportJson,
+  isExportingJson = false,
   isSidebarOpen,
   onToggleSidebar
 }: MainAreaProps) {
@@ -97,6 +101,7 @@ export function MainArea({
   const [activeTab, setActiveTab] = useState<"chat" | "checklist" | "verdict" | "full-checklist" | "full-verdict">("chat");
   const [inputText, setInputText] = useState("");
   const [quickSearchText, setQuickSearchText] = useState("");
+  const [quickFilter, setQuickFilter] = useState<"all" | "pass" | "warn" | "fail">("all");
   const [filterResult, setFilterResult] = useState<string>("all");
   const [isSpecsExpanded, setIsSpecsExpanded] = useState(true);
   const [isLegendVisible, setIsLegendVisible] = useState(true);
@@ -105,6 +110,29 @@ export function MainArea({
   const [sortColumn, setSortColumn] = useState<"stt" | "criteria" | "result" | null>("stt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
   const [citationDoc, setCitationDoc] = useState<DocumentItem | null>(null);
+
+  const handleExportJson = () => {
+    if (onExportReportJson) {
+      onExportReportJson();
+      return;
+    }
+    const payload = {
+      exportedAt: new Date().toISOString(),
+      projectInfo: storedProjectInfo,
+      isSubjectToAppraisal,
+      appraisalReason,
+      appraisalBasis,
+      checklist,
+      warnings,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `BaoCao_PCCC_${(storedProjectInfo.name || "CongTrinh").replace(/\s+/g, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const handleOpenCitation = async (code: string) => {
     try {
@@ -421,7 +449,17 @@ export function MainArea({
   };
 
   const filteredAndSortedChecklist = React.useMemo(() => {
+    const isPass = (res: string) => res === "Đạt" || res === "Không bắt buộc" || res === "Dưới ngưỡng danh mục";
+    const isFail = (res: string) => res === "Không đạt";
+    const isWarn = (res: string) => !isPass(res) && !isFail(res);
+
     const filtered = checklist.filter((item) => {
+      const res = String(item.result);
+      // 0. Quick Status Filter Bar (Tất cả / Đạt / Cảnh báo / Không đạt)
+      if (quickFilter === "pass" && !isPass(res)) return false;
+      if (quickFilter === "warn" && !isWarn(res)) return false;
+      if (quickFilter === "fail" && !isFail(res)) return false;
+
       // 1. Dropdown Filter
       if (filterResult !== "all" && item.result !== filterResult) {
         return false;
@@ -459,7 +497,7 @@ export function MainArea({
       if (valA > valB) return sortDirection === "asc" ? 1 : -1;
       return 0;
     });
-  }, [checklist, filterResult, checklistSearchQuery, sortColumn, sortDirection]);
+  }, [checklist, quickFilter, filterResult, checklistSearchQuery, sortColumn, sortDirection]);
 
   return (
     <div id="app-main-area" className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full overflow-hidden relative font-sans print:overflow-visible print:bg-white print:p-0">
@@ -499,11 +537,7 @@ export function MainArea({
           </div>
         </div>
 
-        {/* Word Docx & PDF Download buttons */}
-        {/* FIX B07: "các nút chức năng chen chúc khó bấm" trên mobile —
-            trước đây 3 nút luôn nằm ngang, tràn/dồn cụm trên màn hình hẹp.
-            Thêm flex-wrap để tự xuống dòng khi không đủ chỗ, và tăng
-            khoảng chạm (py) tối thiểu cho thân thiện cảm ứng hơn. */}
+        {/* Word Docx, PDF & JSON Download buttons */}
         <div className="flex items-center flex-wrap gap-2 shrink-0">
           <button
             onClick={onTriggerAppraisal}
@@ -520,12 +554,6 @@ export function MainArea({
             Thực hiện kiểm duyệt
           </button>
 
-          {/* FIX B04 (Bao_Cao_QA_Lan_3.md — Chưa fix theo QA lần 3, dù đã có
-              code trước đó): thêm nút Huỷ THỨ HAI, đặt CỐ ĐỊNH ngay trong
-              thanh hành động trên cùng (luôn hiển thị bất kể vị trí cuộn
-              chat), không chỉ phụ thuộc vào bong bóng chat tạm thời có thể
-              biến mất nhanh hoặc nằm ngoài vùng nhìn thấy. Tăng độ chắc chắn
-              người dùng luôn thấy được nút Huỷ khi isPending=true. */}
           {isPending && onCancelPending && (
             <button
               onClick={onCancelPending}
@@ -540,7 +568,7 @@ export function MainArea({
 
           <button
             onClick={onExportReport}
-            disabled={isExporting || isExportingPdf || checklist.length === 0 || hasAreaContradiction}
+            disabled={isExporting || isExportingPdf || isExportingJson || checklist.length === 0 || hasAreaContradiction}
             id="btn-export-word"
             className="flex items-center gap-1.5 py-1.5 px-3 bg-brand-orange hover:bg-brand-orange/90 text-white font-medium text-xs rounded-lg shadow-sm shadow-brand-orange/15 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer"
           >
@@ -554,7 +582,7 @@ export function MainArea({
 
           <button
             onClick={onExportReportPdf}
-            disabled={isExporting || isExportingPdf || checklist.length === 0 || hasAreaContradiction}
+            disabled={isExporting || isExportingPdf || isExportingJson || checklist.length === 0 || hasAreaContradiction}
             id="btn-export-pdf"
             className="flex items-center gap-1.5 py-1.5 px-3 bg-red-600 hover:bg-red-700 text-white font-medium text-xs rounded-lg shadow-sm shadow-red-600/15 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer"
           >
@@ -564,6 +592,20 @@ export function MainArea({
               <Download className="w-3.5 h-3.5" />
             )}
             Tải Báo cáo (.pdf)
+          </button>
+
+          <button
+            onClick={handleExportJson}
+            disabled={isExporting || isExportingPdf || isExportingJson || checklist.length === 0 || hasAreaContradiction}
+            id="btn-export-json"
+            className="flex items-center gap-1.5 py-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-medium text-xs rounded-lg shadow-sm shadow-emerald-600/15 transition-all active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:scale-100 cursor-pointer"
+          >
+            {isExportingJson ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <FileCheck className="w-3.5 h-3.5" />
+            )}
+            Xuất JSON (.json)
           </button>
         </div>
       </div>
@@ -1383,6 +1425,38 @@ export function MainArea({
                     </div>
 
                     <div className="flex items-center gap-2.5 flex-wrap">
+                      {/* Thanh bộ lọc nhanh trạng thái (Tất cả / Đạt / Cảnh báo / Không đạt) */}
+                      <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
+                        <button
+                          type="button"
+                          onClick={() => { setQuickFilter("all"); setFilterResult("all"); }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${quickFilter === "all" && filterResult === "all" ? "bg-slate-900 text-white shadow-xs" : "text-slate-600 hover:bg-white"}`}
+                        >
+                          Tất cả ({checklist.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setQuickFilter("pass"); setFilterResult("all"); }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${quickFilter === "pass" ? "bg-emerald-600 text-white shadow-xs" : "text-emerald-700 hover:bg-emerald-50"}`}
+                        >
+                          Đạt ({checklist.filter((i) => i.result === "Đạt" || i.result === "Không bắt buộc" || (i.result as string) === "Dưới ngưỡng danh mục").length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setQuickFilter("warn"); setFilterResult("all"); }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${quickFilter === "warn" ? "bg-amber-500 text-white shadow-xs" : "text-amber-700 hover:bg-amber-50"}`}
+                        >
+                          Cảnh báo ({checklist.filter((i) => i.result !== "Đạt" && i.result !== "Không bắt buộc" && (i.result as string) !== "Dưới ngưỡng danh mục" && i.result !== "Không đạt").length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setQuickFilter("fail"); setFilterResult("all"); }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${quickFilter === "fail" ? "bg-rose-600 text-white shadow-xs" : "text-rose-700 hover:bg-rose-50"}`}
+                        >
+                          Không đạt ({checklist.filter((i) => i.result === "Không đạt").length})
+                        </button>
+                      </div>
+
                       {/* Search box */}
                       <div className="relative w-full sm:w-80">
                         <input
@@ -1410,7 +1484,7 @@ export function MainArea({
                         <span className="font-medium text-slate-500">Trạng thái:</span>
                         <select
                           value={filterResult}
-                          onChange={(e) => setFilterResult(e.target.value)}
+                          onChange={(e) => { setFilterResult(e.target.value); setQuickFilter("all"); }}
                           className="bg-transparent border-none text-slate-800 font-semibold focus:outline-none cursor-pointer pr-1"
                         >
                           <option value="all">Tất cả ({checklist.length})</option>

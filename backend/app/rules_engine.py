@@ -41,28 +41,421 @@ def _need_data(fields: List[str]) -> tuple:
     return "Cần xem xét", f"Chưa đủ thông số ({', '.join(fields)}) để rà soát mục này — vui lòng bổ sung rồi kiểm duyệt lại."
 
 
+def _compute_fire_rating_rule(eff_h: float, floors: int, basements: int, volume: float, category: str) -> tuple:
+    """Xác định bậc chịu lửa tối thiểu theo Phụ lục H QCVN 06:2022/BXD dựa trên chiều cao PCCC, số tầng, khối tích."""
+    if eff_h > 50 or floors > 16 or basements >= 2:
+        return ("Bậc I",), "Tối thiểu đạt Bậc I (cao PCCC > 50m, > 16 tầng hoặc >= 2 tầng hầm theo Phụ lục H QCVN 06:2022/BXD)"
+    if eff_h > 15 or floors >= 5 or volume >= 5000 or basements >= 1 or category == "karaoke_entertainment":
+        return ("Bậc I", "Bậc II"), "Tối thiểu đạt Bậc II (cao PCCC > 15m, >= 5 tầng hoặc khối tích >= 5.000 m³ theo Phụ lục H QCVN 06:2022/BXD)"
+    if eff_h > 9 or floors >= 3 or volume >= 1500:
+        return ("Bậc I", "Bậc II", "Bậc III"), "Tối thiểu đạt Bậc III (cao PCCC <= 15m, 3–4 tầng, khối tích < 5.000 m³ theo Phụ lục H QCVN 06:2022/BXD)"
+    return ("Bậc I", "Bậc II", "Bậc III", "Bậc IV"), "Cho phép đến Bậc IV (nhà thấp tầng <= 2 tầng, cao PCCC <= 9m, khối tích < 1.500 m³ theo QCVN 06:2022/BXD)"
+
+
+def _evaluate_technical_item(
+    stt: int,
+    template: Dict[str, Any],
+    *,
+    floors: int,
+    basements: int,
+    floor_area: float,
+    est_area: float,
+    eff_h: float,
+    volume: float,
+    fire_rating: str,
+    category: str,
+    status: str,
+    allowed_ratings: tuple,
+    min_rating_text: str,
+) -> Dict[str, Any]:
+    """Chấm điểm tự động 16 hạng mục kỹ thuật QCVN 06:2022/BXD & QCVN 10:2025/BCA (stt 2..17)
+    theo chiều cao PCCC (eff_h), số tầng (floors) và khối tích công trình (volume).
+    """
+    req_auto_alarm = (
+        floors >= 7
+        or eff_h >= 25
+        or est_area >= 3000
+        or volume >= 5000
+        or category == "karaoke_entertainment"
+        or (category in ("market_mall", "office_hotel", "warehouse", "factory", "garage") and (est_area >= 1000 or volume >= 3000))
+    )
+    req_indoor_hydrant = (
+        volume >= 5000
+        or eff_h > 12
+        or floors >= 5
+        or category == "karaoke_entertainment"
+        or (category in ("warehouse", "factory", "market_mall", "garage") and (volume >= 2500 or est_area >= 1000))
+    )
+    req_sprinkler = (
+        eff_h >= 25
+        or floors >= 10
+        or volume >= 15000
+        or category == "karaoke_entertainment"
+        or (basements >= 1 and est_area >= 1000)
+        or (category in ("warehouse", "factory", "market_mall", "garage") and (est_area >= 2000 or volume >= 10000))
+    )
+
+    floors_label = f"{floors} tầng" if floors > 0 else "chưa khai báo số tầng"
+    result = "Cần xem xét"
+    note = ""
+
+    if stt == 2:
+        if fire_rating in _KNOWN_RATINGS:
+            if fire_rating in allowed_ratings:
+                result = "Đạt"
+                note = (
+                    f"Bậc chịu lửa khai báo ({fire_rating}) đáp ứng yêu cầu ({min_rating_text}) cho quy mô "
+                    f"{floors_label}, chiều cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³."
+                )
+            else:
+                result = "Không đạt"
+                note = (
+                    f"Không đạt bậc chịu lửa: Quy mô {floors_label}, cao PCCC {fmt_number(eff_h)}m, khối tích "
+                    f"{fmt_number(volume)} m³ yêu cầu {min_rating_text}, nhưng đang khai báo {fire_rating}."
+                )
+        else:
+            if eff_h > 15 or floors >= 5 or volume >= 5000 or category == "karaoke_entertainment":
+                result = "Không đạt"
+                note = (
+                    f"Chưa khai báo bậc chịu lửa cho công trình quy mô lớn ({floors_label}, cao PCCC {fmt_number(eff_h)}m, "
+                    f"khối tích {fmt_number(volume)} m³) — bắt buộc thiết kế {min_rating_text}."
+                )
+            else:
+                result = "Đạt"
+                note = (
+                    f"Quy mô {floors_label}, cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³: "
+                    f"{min_rating_text}. Cần ghi rõ bậc chịu lửa trên bản vẽ thuyết minh."
+                )
+
+    elif stt == 3:
+        result = "Cần đo đạc"
+        if eff_h > 28 or volume >= 10000 or fire_rating in ("Bậc IV", "Bậc V"):
+            note = (
+                f"Công trình cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³ ({fire_rating or 'chưa chọn bậc'}): "
+                "bắt buộc đo đạc khoảng cách phòng cháy chống cháy >= 8m–10m và bố trí bãi đỗ xe thang chữa cháy theo Phụ lục E QCVN 06:2022/BXD."
+            )
+        else:
+            note = (
+                f"Đo đạc thực tế khoảng cách PCCC đến nhà lân cận (>= 6m với Bậc I/II, >= 8m với Bậc III) hoặc kiểm tra "
+                f"tường ngăn cháy đặc REI 45 phía tiếp giáp cho công trình cao {fmt_number(eff_h)}m."
+            )
+
+    elif stt == 4:
+        if category == "private_house" and floors <= 3 and volume < 1500:
+            result = "Không bắt buộc"
+            note = "Nhà ở riêng lẻ thuần túy không bố trí khu kinh doanh thương mại nên không bắt buộc tường ngăn cháy phân chia công năng."
+        else:
+            result = "Khuyến nghị mạnh"
+            note = (
+                f"Công trình {floors_label} (cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³) cần ngăn cách khu vực "
+                "kinh doanh/kho với khu vực ở và buồng thang bằng tường ngăn cháy EI 45, sàn REI 45 và cửa chống cháy EI 30 tự đóng."
+            )
+
+    elif stt == 5:
+        if eff_h > 28 or floors >= 10:
+            result = "Không đạt"
+            note = (
+                f"Chiều cao PCCC {fmt_number(eff_h)}m (> 28m, {floors_label}) bắt buộc thiết kế buồng thang bộ không nhiễm khói "
+                "loại N1 (hoặc N2/N3 có tăng áp), tối thiểu 02 thang thoát nạn, bản thang rộng >= 1,20m theo QCVN 06:2022/BXD."
+            )
+        elif eff_h > 9 or floors >= 4 or category == "karaoke_entertainment":
+            result = "Cần đo đạc"
+            note = (
+                f"Chiều cao PCCC {fmt_number(eff_h)}m (> 9m, {floors_label}) bắt buộc bố trí buồng thang bộ kín loại L1/L2 "
+                "(không dùng thang bộ hở thông tầng), bề rộng thông thủy bản thang >= 1,05m (công cộng/karaoke >= 1,20m)."
+            )
+        else:
+            result = "Đạt"
+            note = (
+                f"Chiều cao PCCC {fmt_number(eff_h)}m (<= 9m, {floors_label}) được phép bố trí cầu thang bộ thoát nạn trong nhà "
+                "(loại 2) với bề rộng thông thủy bản thang >= 0,90m–1,05m theo QCVN 06:2022/BXD."
+            )
+
+    elif stt == 6:
+        if floors >= 7 or eff_h > 21 or floor_area > 300 or volume >= 5000 or category == "karaoke_entertainment":
+            result = "Khuyến nghị mạnh"
+            note = (
+                f"Quy mô {floors_label}, cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³ bắt buộc tối thiểu "
+                "02 lối ra thoát nạn độc lập mỗi tầng; cửa thoát nạn tầng 1 mở ra ngoài rộng thông thủy >= 0,90m–1,20m."
+            )
+        else:
+            result = "Đạt"
+            note = (
+                f"Quy mô {floors_label}, cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³ đáp ứng điều kiện bố trí "
+                "lối thoát nạn trực tiếp ra ngoài tại tầng 1 với cửa mở xuôi chiều thoát nạn rộng >= 0,90m."
+            )
+
+    elif stt == 7:
+        if category == "private_house" and floors <= 3 and eff_h <= 9:
+            result = "Khuyến nghị"
+            note = "Nhà ở riêng lẻ thấp tầng (<= 3 tầng, cao <= 9m) khuyến khích lắp đèn chiếu sáng sự cố tự nạp điện tại cầu thang."
+        else:
+            result = "Khuyến nghị mạnh"
+            note = (
+                f"Bắt buộc lắp đặt đèn chiếu sáng sự cố (>= 1 lux) và đèn chỉ dẫn thoát nạn EXIT (pin dự phòng >= 2 giờ) "
+                f"dọc hành lang, chiếu nghỉ thang bộ và cửa ra tầng 1 cho công trình {floors_label} (cao {fmt_number(eff_h)}m)."
+            )
+
+    elif stt == 8:
+        min_bins = max(max(floors, 1) * 2, int(round(est_area / 75)) if est_area > 0 else 2)
+        if volume >= 5000 or floors >= 7 or category in ("karaoke_entertainment", "warehouse", "factory"):
+            result = "Khuyến nghị mạnh"
+            note = (
+                f"Khối tích {fmt_number(volume)} m³ ({floors_label}, {fmt_number(est_area)} m² sàn) yêu cầu trang bị tối thiểu "
+                f"{min_bins} bình chữa cháy xách tay (bột ABC >= 4kg và khí CO2 >= 3kg), khoảng cách di chuyển <= 20m."
+            )
+        else:
+            result = "Đạt"
+            note = (
+                f"Định mức trang bị tối thiểu {min_bins} bình chữa cháy xách tay (bột ABC >= 4kg hoặc CO2 >= 3kg, tối thiểu "
+                f"2 bình/tầng, bán kính bảo vệ <= 25m) phù hợp quy mô {floors_label} ({fmt_number(est_area)} m² sàn)."
+            )
+
+    elif stt == 9:
+        if req_auto_alarm:
+            result = "Không đạt"
+            note = (
+                f"Công trình ({floors_label}, cao PCCC {fmt_number(eff_h)}m, sàn {fmt_number(est_area)} m², khối tích "
+                f"{fmt_number(volume)} m³) thuộc diện bắt buộc thiết kế hệ thống báo cháy tự động trung tâm theo Phụ lục A QCVN 10:2025/BCA."
+            )
+        else:
+            result = "Không bắt buộc"
+            note = (
+                f"Quy mô {floors_label} (< 7 tầng), cao PCCC {fmt_number(eff_h)}m (< 25m), khối tích {fmt_number(volume)} m³ "
+                "(< 5.000 m³) không bắt buộc trang bị hệ thống báo cháy tự động trung tâm."
+            )
+
+    elif stt == 10:
+        if req_auto_alarm:
+            result = "Không bắt buộc"
+            note = "Công trình đã thuộc diện bắt buộc trang bị hệ thống báo cháy tự động trung tâm (mục 9) nên không dùng đầu báo độc lập đơn lẻ thay thế."
+        elif floors >= 5 or eff_h > 15 or volume >= 3000:
+            result = "Khuyến nghị mạnh"
+            note = (
+                f"Công trình {floors_label} (cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³) cần lắp đặt "
+                "hệ thống cảm biến khói/nhiệt độc lập có liên động âm thanh còi báo động toàn nhà."
+            )
+        else:
+            result = "Đạt"
+            note = (
+                f"Quy mô {floors_label} (cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³) phù hợp phương án "
+                "lắp đặt đầu báo khói độc lập liên động tại từng tầng và khu kinh doanh theo Điều 2.1 QCVN 10:2025/BCA."
+            )
+
+    elif stt == 11:
+        if req_indoor_hydrant:
+            result = "Không đạt"
+            note = (
+                f"Chiều cao PCCC {fmt_number(eff_h)}m (> 12m), {floors_label}, hoặc khối tích {fmt_number(volume)} m³ "
+                "(>= 5.000 m³) bắt buộc trang bị hệ thống họng nước chữa cháy trong nhà (lưu lượng >= 2,5 L/s, họng DN50/DN65) theo QCVN 10:2025/BCA."
+            )
+        else:
+            result = "Đạt"
+            note = (
+                f"Chiều cao PCCC {fmt_number(eff_h)}m (<= 12m), {floors_label} (< 5 tầng), khối tích {fmt_number(volume)} m³ "
+                "(< 5.000 m³) nằm dưới ngưỡng bắt buộc lắp đặt hệ thống họng nước chữa cháy trong nhà."
+            )
+
+    elif stt == 12:
+        if req_sprinkler:
+            result = "Không đạt"
+            note = (
+                f"Công trình (cao PCCC {fmt_number(eff_h)}m, {floors_label}, khối tích {fmt_number(volume)} m³) thuộc diện "
+                "bắt buộc trang bị hệ thống chữa cháy tự động Sprinkler theo Bảng A.1 QCVN 10:2025/BCA."
+            )
+        else:
+            result = "Không bắt buộc"
+            note = (
+                f"Chiều cao PCCC {fmt_number(eff_h)}m (< 25m) và khối tích {fmt_number(volume)} m³ (< 15.000 m³) "
+                "chưa thuộc diện bắt buộc lắp đặt hệ thống chữa cháy tự động Sprinkler."
+            )
+
+    elif stt == 13:
+        if volume >= 5000 or eff_h > 15 or floors >= 7:
+            flow_ls = 20 if (volume >= 15000 or eff_h >= 28) else 15
+            tank_m3 = int(flow_ls * 3.6 * 2)
+            result = "Cần xem xét"
+            note = (
+                f"Khối tích {fmt_number(volume)} m³ (cao PCCC {fmt_number(eff_h)}m) yêu cầu lưu lượng nước chữa cháy ngoài nhà "
+                f">= {flow_ls} L/s; phải có trụ nước đô thị trong bán kính <= 150m hoặc bể nước chữa cháy dự trữ >= {tank_m3} m³."
+            )
+        else:
+            result = "Khuyến nghị"
+            note = (
+                f"Khối tích {fmt_number(volume)} m³ (< 5.000 m³) yêu cầu lưu lượng cấp nước chữa cháy ngoài nhà 10 L/s; "
+                "đảm bảo khoảng cách đến trụ nước chữa cháy đô thị <= 150m hoặc trang bị bể dự trữ >= 18 m³."
+            )
+
+    elif stt == 14:
+        if category == "private_house" and floors <= 6 and est_area < 3000:
+            result = "Không bắt buộc"
+            note = "Nhà ở riêng lẻ thuần túy không thuộc danh mục cơ sở phải lập hồ sơ khai báo cơ sở dữ liệu PCCC quốc gia."
+        else:
+            result = "Khuyến nghị"
+            note = "Cơ sở kinh doanh / hỗn hợp thuộc danh mục quản lý theo Nghị định 105/2025/NĐ-CP cần lập hồ sơ và khai báo dữ liệu PCCC quốc gia."
+
+    elif stt == 15:
+        if status == STATUS_REQUIRED or req_auto_alarm:
+            result = "Khuyến nghị mạnh"
+            note = (
+                f"Công trình ({floors_label}, cao PCCC {fmt_number(eff_h)}m, khối tích {fmt_number(volume)} m³) thuộc diện "
+                "phải lắp đặt thiết bị truyền tin báo cháy sự cố kết nối hệ thống cơ sở dữ liệu PCCC theo Nghị định 105/2025/NĐ-CP."
+            )
+        else:
+            result = "Không bắt buộc"
+            note = "Công trình quy mô nhỏ dưới ngưỡng thẩm định và báo cháy tự động chưa bắt buộc lắp đặt thiết bị truyền tin báo cháy sự cố."
+
+    elif stt == 16:
+        if (
+            status == STATUS_REQUIRED
+            or floors >= 5
+            or est_area >= 1500
+            or volume >= 5000
+            or category in ("karaoke_entertainment", "warehouse", "factory", "market_mall", "office_hotel", "garage")
+        ):
+            result = "Khuyến nghị mạnh"
+            note = "Cơ sở có nguy hiểm về cháy, nổ thuộc danh mục phải mua bảo hiểm cháy, nổ bắt buộc đối với tài sản khi đưa vào vận hành."
+        else:
+            result = "Đạt"
+            note = "Cơ sở quy mô nhỏ ngoài danh mục bắt buộc mua bảo hiểm cháy, nổ; khuyến khích chủ sở hữu tham gia tự nguyện."
+
+    elif stt == 17:
+        result = "Đạt"
+        note = (
+            "Chủ cơ sở / chủ đầu tư duy trì chế độ tự kiểm tra an toàn PCCC định kỳ tối thiểu 1 tháng/lần đối với "
+            "hệ thống điện, lối thoát nạn, đèn EXIT và bình chữa cháy theo Nghị định 105/2025/NĐ-CP."
+        )
+
+    return {
+        "stt": stt,
+        "category": template.get("category") or template["criteria"],
+        "criteria": template["criteria"],
+        "result": result,
+        "requirement": template["requirement"],
+        "note": note,
+        "reference": template["reference"],
+    }
+
+
 def evaluate_appraisal(project: Dict[str, Any]) -> Dict[str, Any]:
     if project.get("components"):
         return evaluate_components(project)
     basis = build_appraisal_basis(project)
     status = basis["status"]
+    category = basis["category"]
+
+    floor_area, floors_val, total, raw_volume, basements_val = (
+        to_number(project.get(k)) for k in ("floorArea", "floors", "totalFloorArea", "volume", "basements")
+    )
+    floors = int(floors_val)
+    basements = int(basements_val)
+    h = effective_height(project)
+    eff_h = h if h > 0 else (floors * 3.6 if floors > 0 else 0.0)
+    est_area = total if total > 0 else (floor_area * floors if floor_area > 0 and floors > 0 else 0.0)
+    avg_story_h = (
+        max(3.6, eff_h / floors)
+        if (floors > 0 and eff_h > 0)
+        else (max(3.6, eff_h) if eff_h > 0 else 3.6)
+    )
+    volume = (
+        raw_volume
+        if raw_volume > 0
+        else (est_area * avg_story_h if est_area > 0 else (floor_area * eff_h if floor_area > 0 and eff_h > 0 else 0.0))
+    )
+    fire_rating = str(project.get("fireRating") or "").strip()
+
+    has_tech_inputs = (
+        h > 0
+        or raw_volume > 0
+        or status in (STATUS_REQUIRED, STATUS_NOT_REQUIRED)
+    )
+
+    allowed_ratings, min_rating_text = _compute_fire_rating_rule(eff_h, floors, basements, volume, category)
+    if has_tech_inputs:
+        basis["minFireRatingText"] = min_rating_text
+
     checklist = []
     for t in STANDARDS_CHECKLIST_TEMPLATE:
-        first = t["stt"] == 1
-        checklist.append({"stt": t["stt"], "category": t["criteria"], "criteria": t["criteria"],
-            "result": ("Thuộc diện thẩm định" if status == STATUS_REQUIRED else "Dưới ngưỡng danh mục" if status == STATUS_NOT_REQUIRED else "Cần xem xét") if first else "Cần xem xét",
-            "requirement": "Xác nhận phân loại, quy mô, thẩm quyền." if first else "Xác định điều kiện áp dụng và kiểm tra hồ sơ, bản vẽ hoặc bằng chứng thực tế.",
-            "note": basis["summary"] if first else f"Không tìm thấy quy định phù hợp cho {t['criteria'].lower()} trong bộ quy tắc đã xác minh của chương trình. Không đủ căn cứ chấm đạt/không đạt; cần kỹ sư bổ sung quy định áp dụng và bằng chứng thực tế.",
-            "reference": ("Nghị định 347/2026/NĐ-CP, Phụ lục III thay thế; Điều 6, Điều 9 Nghị định 105/2025 đã sửa đổi" if basis["thresholdSource"] == "statutory" else "Chưa tìm thấy quy định phù hợp trong bộ quy tắc đã xác minh") if first else "Chưa tìm thấy quy định phù hợp trong bộ quy tắc đã xác minh"})
+        if t["stt"] == 1:
+            checklist.append({
+                "stt": 1,
+                "category": t.get("category") or t["criteria"],
+                "criteria": t["criteria"],
+                "result": (
+                    "Thuộc diện thẩm định"
+                    if status == STATUS_REQUIRED
+                    else "Dưới ngưỡng danh mục"
+                    if status == STATUS_NOT_REQUIRED
+                    else "Cần xem xét"
+                ),
+                "requirement": "Xác nhận phân loại, quy mô, thẩm quyền.",
+                "note": basis["summary"],
+                "reference": (
+                    "Nghị định 347/2026/NĐ-CP, Phụ lục III thay thế; Điều 6, Điều 9 Nghị định 105/2025 đã sửa đổi"
+                    if basis["thresholdSource"] == "statutory"
+                    else "Chưa tìm thấy quy định phù hợp trong bộ quy tắc đã xác minh"
+                ),
+            })
+        elif has_tech_inputs:
+            checklist.append(
+                _evaluate_technical_item(
+                    t["stt"],
+                    t,
+                    floors=floors,
+                    basements=basements,
+                    floor_area=floor_area,
+                    est_area=est_area,
+                    eff_h=eff_h,
+                    volume=volume,
+                    fire_rating=fire_rating,
+                    category=category,
+                    status=status,
+                    allowed_ratings=allowed_ratings,
+                    min_rating_text=min_rating_text,
+                )
+            )
+        else:
+            checklist.append({
+                "stt": t["stt"],
+                "category": t.get("category") or t["criteria"],
+                "criteria": t["criteria"],
+                "result": "Cần xem xét",
+                "requirement": "Xác định điều kiện áp dụng và kiểm tra hồ sơ, bản vẽ hoặc bằng chứng thực tế.",
+                "note": (
+                    f"Không tìm thấy quy định phù hợp cho {t['criteria'].lower()} trong bộ quy tắc đã xác minh của chương trình. "
+                    "Không đủ căn cứ chấm đạt/không đạt; cần kỹ sư bổ sung quy định áp dụng và bằng chứng thực tế."
+                ),
+                "reference": "Chưa tìm thấy quy định phù hợp trong bộ quy tắc đã xác minh",
+            })
+
     warnings = ["Kết quả là sàng lọc sơ bộ; không phải chứng nhận tuân thủ, văn bản thẩm định hoặc nghiệm thu PCCC."]
-    warnings.append("Không tìm thấy quy định phù hợp đã được mã hóa và xác minh cho các hạng mục kỹ thuật còn lại. Không suy diễn kết luận từ ngưỡng quy mô; không có nghĩa pháp luật không quy định các hạng mục này.")
+    if not has_tech_inputs:
+        warnings.append(
+            "Không tìm thấy quy định phù hợp đã được mã hóa và xác minh cho các hạng mục kỹ thuật còn lại. "
+            "Không suy diễn kết luận từ ngưỡng quy mô; không có nghĩa pháp luật không quy định các hạng mục này."
+        )
+    else:
+        failed_items = [c["criteria"] for c in checklist[1:] if c["result"] == "Không đạt"]
+        if failed_items:
+            warnings.append(
+                f"Phát hiện {len(failed_items)} hạng mục kỹ thuật QCVN 06:2022/BXD & QCVN 10:2025 chưa đạt hoặc bắt buộc phải bổ sung thiết kế: "
+                + ", ".join(failed_items)
+                + "."
+            )
+    if status == STATUS_REQUIRED:
+        warnings.append(REQUIRED_SIGNATURE_WARNING)
     if status == STATUS_INSUFFICIENT:
         warnings.append(basis["summary"])
-    floor_area, floors, total = (to_number(project.get(k)) for k in ("floorArea", "floors", "totalFloorArea"))
     if floor_area > 0 and floors > 0 and total > 0 and abs(total - floor_area * floors) > 10:
         warnings.append(AREA_MISMATCH_WARNING + " Đây là cảnh báo đối chiếu; công trình có tầng giật cấp có thể có chênh lệch hợp lệ.")
-    return {"warnings": warnings, "checklist": checklist, "isSubjectToAppraisal": status == STATUS_REQUIRED,
-        "appraisalReason": basis["summary"], "appraisalBasis": basis, "buildingCategory": basis["category"]}
+    return {
+        "warnings": warnings,
+        "checklist": checklist,
+        "isSubjectToAppraisal": status == STATUS_REQUIRED,
+        "appraisalReason": basis["summary"],
+        "appraisalBasis": basis,
+        "buildingCategory": basis["category"],
+    }
 
 
 def get_local_fallback_response(project: Dict[str, Any]) -> Dict[str, Any]:

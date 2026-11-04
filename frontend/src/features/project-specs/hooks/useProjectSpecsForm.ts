@@ -21,6 +21,7 @@ export function useProjectSpecsForm({
   const [localPcccHeight, setLocalPcccHeight] = useState<string | number>(project.pcccHeight ?? "");
   const [localFloorArea, setLocalFloorArea] = useState<string | number>(project.floorArea ?? "");
   const [localTotalFloorArea, setLocalTotalFloorArea] = useState<string | number>(project.totalFloorArea ?? "");
+  const [localVolume, setLocalVolume] = useState<string | number>(project.volume ?? "");
   const [localFireRating, setLocalFireRating] = useState(project.fireRating || "");
   const [localCommDetails, setLocalCommDetails] = useState(project.commercialDetails || "");
 
@@ -40,6 +41,7 @@ export function useProjectSpecsForm({
     if (document.activeElement?.id !== "spec-pccc-height") setLocalPcccHeight(project.pcccHeight ?? "");
     if (document.activeElement?.id !== "spec-floor-area") setLocalFloorArea(project.floorArea ?? "");
     if (document.activeElement?.id !== "spec-total-floor-area") setLocalTotalFloorArea(project.totalFloorArea ?? "");
+    if (document.activeElement?.id !== "spec-volume") setLocalVolume(project.volume ?? "");
     if (document.activeElement?.id !== "spec-fire-rating") setLocalFireRating(project.fireRating || "");
     if (document.activeElement?.id !== "spec-comm-details") setLocalCommDetails(project.commercialDetails || "");
     setFloorFunctions(project.floorFunctions || []);
@@ -115,6 +117,8 @@ export function useProjectSpecsForm({
     setLocalFloorArea,
     localTotalFloorArea,
     setLocalTotalFloorArea,
+    localVolume,
+    setLocalVolume,
     localFireRating,
     setLocalFireRating,
     localCommDetails,

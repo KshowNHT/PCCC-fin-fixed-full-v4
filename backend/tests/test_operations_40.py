@@ -687,8 +687,221 @@ class Operations40(unittest.TestCase):
             self.assertEqual(resp["extractedProjectInfo"]["name"], "Nhà hỗn hợp PCCC")
             self.assertEqual(resp["extractedProjectInfo"]["components"][0]["floors"], 4)
 
+    def test_S37_dynamic_16_technical_checklist_and_json_export(self):
+        """Gói công việc 3: Chấm điểm động 16 hạng mục QCVN 06 theo chiều cao PCCC, số tầng, khối tích & xuất JSON."""
+        sid = self.session()
 
+        # 1. Công trình thấp tầng, khối tích nhỏ (3 tầng, cao PCCC 10.5m, khối tích 2.400m3, Bậc II)
+        low_rise = {
+            "name": "Trụ sở văn phòng 3 tầng",
+            "type": "Trụ sở cơ quan, văn phòng làm việc",
+            "floors": 3,
+            "basements": 0,
+            "pcccHeight": 10.5,
+            "height": 11.2,
+            "floorArea": 250,
+            "totalFloorArea": 750,
+            "volume": 2400,
+            "fireRating": "Bậc II",
+        }
+        r_low = self.client.put(f"/api/sessions/{sid}/project?appraise=true", headers=self.staffa, json=low_rise)
+        self.assertEqual(r_low.status_code, 200, r_low.text)
+        cl_low = {c["stt"]: c for c in r_low.json()["checklist"]}
+        self.assertEqual(len(cl_low), 17)
+        # STT 2: Bậc II cho nhà 10.5m, 3 tầng, khối tích 2.400m3 -> Đạt
+        self.assertEqual(cl_low[2]["result"], "Đạt")
+        # STT 9: Báo cháy tự động trung tâm (3 tầng < 7, cao 10.5m < 25m, khối tích 2.400m3 < 5.000m3) -> Không bắt buộc
+        self.assertEqual(cl_low[9]["result"], "Không bắt buộc")
+        # STT 11: Khối tích 2.400 m3 (< 5.000 m3), cao 10.5m (<= 12m), 3 tầng (< 5 tầng) -> Đạt (dưới ngưỡng bắt buộc họng nước)
+        self.assertEqual(cl_low[11]["result"], "Đạt")
+        # STT 12: Cao 10.5m (< 25m), khối tích 2.400 m3 (< 15.000 m3) -> Sprinkler Không bắt buộc
+        self.assertEqual(cl_low[12]["result"], "Không bắt buộc")
+        # STT 15: Công trình dưới ngưỡng thẩm định và báo cháy tự động -> Thiết bị truyền tin Không bắt buộc
+        self.assertEqual(cl_low[15]["result"], "Không bắt buộc")
+
+        # 2. Công trình cao tầng, khối tích lớn nhưng bậc chịu lửa Bậc IV (12 tầng, cao PCCC 38m, khối tích 28.000m3, Bậc IV)
+        high_rise = {
+            "name": "Tòa nhà hỗn hợp 12 tầng",
+            "type": "Nhà hỗn hợp",
+            "floors": 12,
+            "basements": 2,
+            "pcccHeight": 38.0,
+            "height": 40.5,
+            "floorArea": 650,
+            "totalFloorArea": 7800,
+            "volume": 28000,
+            "fireRating": "Bậc IV",
+        }
+        r_high = self.client.put(f"/api/sessions/{sid}/project?appraise=true", headers=self.staffa, json=high_rise)
+        self.assertEqual(r_high.status_code, 200, r_high.text)
+        cl_high = {c["stt"]: c for c in r_high.json()["checklist"]}
+        self.assertEqual(cl_high[1]["result"], "Thuộc diện thẩm định")  # Phụ lục III: bắt buộc thẩm định
+        # STT 2: Bậc IV cho nhà cao 38m, 12 tầng, khối tích 28.000m3 (yêu cầu Bậc I/II) -> Không đạt
+        self.assertEqual(cl_high[2]["result"], "Không đạt")
+        # STT 5: Cao 38m (> 28m, 12 tầng) bắt buộc buồng thang không nhiễm khói N1/N2/N3 -> Không đạt
+        self.assertEqual(cl_high[5]["result"], "Không đạt")
+        # STT 9: Báo cháy tự động trung tâm (12 tầng, cao 38m, khối tích 28.000m3) -> Không đạt (bắt buộc thiết kế)
+        self.assertEqual(cl_high[9]["result"], "Không đạt")
+        # STT 11: Khối tích 28.000m3 (>= 5.000m3), cao 38m (> 12m), 12 tầng -> Không đạt (bắt buộc họng nước trong nhà)
+        self.assertEqual(cl_high[11]["result"], "Không đạt")
+        # STT 12: Cao 38m (>= 25m), khối tích 28.000m3 (>= 15.000m3) -> Không đạt (bắt buộc Sprinkler)
+        self.assertEqual(cl_high[12]["result"], "Không đạt")
+        # STT 15: Thuộc diện thẩm định & báo cháy tự động -> Khuyến nghị mạnh (thiết bị truyền tin báo cháy)
+        self.assertEqual(cl_high[15]["result"], "Khuyến nghị mạnh")
+
+        # 3. Xuất đủ 3 định dạng báo cáo (Word, PDF, JSON) từ session thực tế, xác minh khối tích 28.000m3 có mặt
+        r_json = self.client.post("/api/report/export-json", headers=self.staffa, json={"sessionId": sid})
+        self.assertEqual(r_json.status_code, 200, r_json.text)
+        self.assertIn("application/json", r_json.headers.get("content-type", ""))
+        self.assertIn("attachment; filename=", r_json.headers.get("content-disposition", ""))
+        payload = r_json.json()
+        self.assertEqual(payload["projectInfo"]["volume"], 28000)
+        self.assertEqual(payload["projectInfo"]["pcccHeight"], 38.0)
+        self.assertEqual(len(payload["checklist"]), 17)
+        self.assertEqual(payload["checklist"][1]["result"], "Không đạt")  # STT 2
+
+        r_docx = self.client.post("/api/report/export", headers=self.staffa, json={"sessionId": sid})
+        self.assertEqual(r_docx.status_code, 200)
+        doc = WordDocument(io.BytesIO(r_docx.content))
+        docx_text = " ".join(p.text for p in doc.paragraphs) + " " + " ".join(
+            cell.text for table in doc.tables for row in table.rows for cell in row.cells
+        )
+        self.assertIn("28000", docx_text)
+
+        r_pdf = self.client.post("/api/report/export-pdf", headers=self.staffa, json={"sessionId": sid})
+        self.assertEqual(r_pdf.status_code, 200)
+        pdf_text = " ".join(page.extract_text() for page in PdfReader(io.BytesIO(r_pdf.content)).pages)
+        self.assertIn("28000", pdf_text)
+
+        # 4. Nhà kho 1 tầng cao 18m (high-bay) chưa nhập volume (volume=0, totalFloorArea=1200m2)
+        # -> Khối tích thực tế tính theo chiều cao 1200 * 18 = 21.600 m3 (>= 15.000 m3) -> Bắt buộc Họng nước (STT 11) & Sprinkler (STT 12)
+        high_bay = {
+            "name": "Nhà kho cao 18m",
+            "type": "Nhà kho",
+            "floors": 1,
+            "basements": 0,
+            "pcccHeight": 18.0,
+            "floorArea": 1200,
+            "totalFloorArea": 1200,
+            "volume": 0,
+            "hazardClass": "C",
+            "fireRating": "Bậc II",
+        }
+        r_bay = self.client.put(f"/api/sessions/{sid}/project?appraise=true", headers=self.staffa, json=high_bay)
+        self.assertEqual(r_bay.status_code, 200, r_bay.text)
+        cl_bay = {c["stt"]: c for c in r_bay.json()["checklist"]}
+        self.assertEqual(cl_bay[11]["result"], "Không đạt")
+        self.assertIn("21.600 m³", cl_bay[11]["note"])
+        self.assertEqual(cl_bay[12]["result"], "Không đạt")
+
+        # 5. Công trình rỗng thông số quy mô (0 tầng, 0m, 0m3) chỉ chọn Bậc IV -> Không được chấm Đạt giả
+        zero_scale = {
+            "name": "Chưa nhập quy mô",
+            "type": "Nhà hỗn hợp",
+            "floors": 0,
+            "basements": 0,
+            "pcccHeight": 0,
+            "height": 0,
+            "floorArea": 0,
+            "totalFloorArea": 0,
+            "volume": 0,
+            "fireRating": "Bậc IV",
+        }
+        r_zero = self.client.put(f"/api/sessions/{sid}/project?appraise=true", headers=self.staffa, json=zero_scale)
+        self.assertEqual(r_zero.status_code, 200, r_zero.text)
+        self.assertTrue(all(c["result"] == "Cần xem xét" for c in r_zero.json()["checklist"]))
+
+    def test_S38_ai_health_monitoring_and_docker_1click_config(self):
+        """Gói công việc 4: Giám sát trạng thái kết nối Gemini AI (/api/health/ai) & cấu hình Docker 1-Click + CI/CD."""
+        from app import config, gemini_client
+
+        # 1. Chặn truy cập chưa xác thực (401)
+        self.assertEqual(self.client.get("/api/health/ai").status_code, 401)
+        self.assertEqual(self.client.get("/api/health/ai/ping").status_code, 401)
+
+        # 2. Phân quyền RBAC: Staff không được phép gọi ping trực tiếp (403)
+        self.assertEqual(self.client.get("/api/health/ai?ping=true", headers=self.staffa).status_code, 403)
+        self.assertEqual(self.client.get("/api/health/ai/ping", headers=self.staffa).status_code, 403)
+
+        # 3. Trạng thái chưa cấu hình GEMINI_API_KEY
+        with patch.object(config, "GEMINI_API_KEY", ""), patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
+            r_unconf = self.client.get("/api/health/ai", headers=self.admin)
+            self.assertEqual(r_unconf.status_code, 200)
+            self.assertFalse(r_unconf.json()["geminiApiKeyConfigured"])
+            self.assertIn("Chưa cấu hình", r_unconf.json()["detail"])
+
+            r_ping_unconf = self.client.get("/api/health/ai?ping=true", headers=self.admin)
+            self.assertEqual(r_ping_unconf.status_code, 200)
+            self.assertFalse(r_ping_unconf.json()["geminiApiKeyConfigured"])
+            self.assertEqual(r_ping_unconf.json()["status"], "error")
+
+        # 4. Trạng thái đã cấu hình GEMINI_API_KEY và Admin thực hiện Ping thành công / thất bại
+        with patch.object(config, "GEMINI_API_KEY", "fake-gemini-key-for-qa"):
+            r_conf = self.client.get("/api/health/ai", headers=self.admin)
+            self.assertEqual(r_conf.status_code, 200)
+            self.assertTrue(r_conf.json()["geminiApiKeyConfigured"])
+            self.assertEqual(r_conf.json()["status"], "unknown")
+
+            with patch.object(gemini_client, "generate_content_with_retry", AsyncMock(return_value=object())):
+                r_ping_ok = self.client.get("/api/health/ai?ping=true", headers=self.admin)
+                self.assertEqual(r_ping_ok.status_code, 200)
+                self.assertTrue(r_ping_ok.json()["geminiApiKeyConfigured"])
+                self.assertEqual(r_ping_ok.json()["status"], "ok")
+
+                r_ping_route = self.client.get("/api/health/ai/ping", headers=self.admin)
+                self.assertEqual(r_ping_route.status_code, 200)
+                self.assertEqual(r_ping_route.json()["status"], "ok")
+
+            with patch.object(
+                gemini_client,
+                "generate_content_with_retry",
+                AsyncMock(side_effect=RuntimeError("API quota exceeded for key fake-gemini-key-for-qa")),
+            ):
+                r_ping_err = self.client.get("/api/health/ai?ping=true", headers=self.admin)
+                self.assertEqual(r_ping_err.status_code, 200)
+                self.assertTrue(r_ping_err.json()["geminiApiKeyConfigured"])
+                self.assertEqual(r_ping_err.json()["status"], "error")
+                self.assertIn("Không gọi được Gemini API", r_ping_err.json()["detail"])
+                self.assertNotIn("fake-gemini-key-for-qa", r_ping_err.json()["detail"])
+
+            with patch.object(gemini_client, "generate_content_with_retry", AsyncMock(side_effect=TimeoutError())):
+                r_ping_timeout = self.client.get("/api/health/ai?ping=true", headers=self.admin)
+                self.assertEqual(r_ping_timeout.status_code, 200)
+                self.assertEqual(r_ping_timeout.json()["status"], "error")
+                self.assertIn("Quá thời gian phản hồi", r_ping_timeout.json()["detail"])
+
+            # Verify get_ai() dynamically picks up updated config.GEMINI_API_KEY
+            with patch("app.gemini_client.genai.Client") as mock_genai_client:
+                gemini_client.get_ai()
+                mock_genai_client.assert_called_once()
+                self.assertEqual(mock_genai_client.call_args.kwargs["api_key"], "fake-gemini-key-for-qa")
+
+        # 5. Kiểm tra tồn tại và tính tương thích của compose.local.yaml, compose.yaml, run-docker.bat & CI/CD
+        repo_root = Path(__file__).resolve().parents[2]
+        compose_local = repo_root / "compose.local.yaml"
+        compose_prod = repo_root / "compose.yaml"
+        run_docker_bat = repo_root / "run-docker.bat"
+        ci_workflow = repo_root / ".github" / "workflows" / "ci-cd.yml"
+
+        self.assertTrue(compose_local.exists(), "compose.local.yaml must exist")
+        self.assertTrue(compose_prod.exists(), "compose.yaml must exist")
+        self.assertTrue(run_docker_bat.exists(), "run-docker.bat must exist")
+        self.assertTrue(ci_workflow.exists(), ".github/workflows/ci-cd.yml must exist")
+
+        local_text = compose_local.read_text(encoding="utf-8")
+        self.assertIn("8000:3000", local_text)
+        self.assertIn("5173:80", local_text)
+        self.assertIn("postgres:16-alpine", local_text)
+        self.assertNotIn("GEMINI_API_KEY:", local_text, "compose.local.yaml must not override backend/.env GEMINI_API_KEY in environment block")
+
+        bat_text = run_docker_bat.read_text(encoding="utf-8")
+        self.assertIn("compose.local.yaml", bat_text)
+        self.assertIn("http://localhost:5173", bat_text)
+        self.assertIn("http://localhost:8000", bat_text)
+        self.assertNotIn('copy /Y ".env.example" ".env"', bat_text)
 
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+

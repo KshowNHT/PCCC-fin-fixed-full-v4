@@ -250,7 +250,7 @@ def generate_compliance_report_pdf(project: Dict[str, Any], checklist: List[Dict
     story = [para("BÁO CÁO SÀNG LỌC HỒ SƠ PCCC", title), para(project.get("name"), title),
              para("Kết quả sơ bộ cần kỹ sư xác nhận; không thay thế văn bản thẩm định hoặc nghiệm thu."),
              para("I. THÔNG TIN CÔNG TRÌNH", heading)]
-    labels = {"name":"Tên công trình", "location":"Địa điểm", "investor":"Chủ đầu tư", "designer":"Đơn vị thiết kế", "stage":"Giai đoạn", "type":"Công năng khai báo", "floors":"Số tầng nổi", "basements":"Số tầng hầm", "pcccHeight":"Chiều cao PCCC (m)", "floorArea":"Diện tích tầng (m²)", "totalFloorArea":"Tổng diện tích sàn (m²)", "fireRating":"Bậc chịu lửa khai báo", "commercialDetails":"Chi tiết công năng"}
+    labels = {"name":"Tên công trình", "location":"Địa điểm", "investor":"Chủ đầu tư", "designer":"Đơn vị thiết kế", "stage":"Giai đoạn", "type":"Công năng khai báo", "floors":"Số tầng nổi", "basements":"Số tầng hầm", "pcccHeight":"Chiều cao PCCC (m)", "floorArea":"Diện tích tầng (m²)", "totalFloorArea":"Tổng diện tích sàn (m²)", "volume":"Khối tích (m³)", "fireRating":"Bậc chịu lửa khai báo", "commercialDetails":"Chi tiết công năng"}
     rows = [[para(label), para(project.get(key))] for key, label in labels.items()]
     table = LongTable(rows, colWidths=[145, 365], splitInRow=1)
     table.setStyle(TableStyle([("GRID", (0,0),(-1,-1),0.4,colors.lightgrey),("VALIGN",(0,0),(-1,-1),"TOP"),("BACKGROUND",(0,0),(0,-1),colors.HexColor("#f1f5f9"))]))

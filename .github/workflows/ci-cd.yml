@@ -1,0 +1,174 @@
+name: PCCC CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master, dev]
+  pull_request:
+    branches: [main, master, dev]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    name: Backend Tests & 3,000 Fuzz Scenarios
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install system dependencies (Poppler for PDF OCR)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends poppler-utils
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            backend/requirements-lock.txt
+            backend/requirements-test.txt
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements-lock.txt -r backend/requirements-test.txt
+
+      - name: Verify Backend MVC Modular Constraint (main.py < 150 lines)
+        run: |
+          LINES=$(wc -l < backend/app/main.py)
+          echo "backend/app/main.py line count: $LINES"
+          if [ "$LINES" -ge 150 ]; then
+            echo "ERROR: backend/app/main.py must be < 150 lines (found $LINES)"
+            exit 1
+          fi
+
+      - name: Run Full Backend Unittest Suite (Operations, Components, Migrations)
+        run: |
+          python -m unittest discover -s backend/tests -p "test_*.py" -v
+
+      - name: Run 3,000 Fuzzing Scenarios Explicitly
+        run: |
+          python backend/tests/test_rules_fuzz.py
+
+  frontend-quality:
+    name: Frontend TypeScript Lint, Build & JSDOM Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12 (for UI fixtures generation)
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements-lock.txt
+
+      - name: Generate UI Test Fixtures
+        run: |
+          pip install -r backend/requirements-lock.txt
+          python backend/tests/make_ui_fixtures.py
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend dependencies
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify Frontend MVC Modular Constraint (Modular .tsx < 400 lines)
+        working-directory: frontend
+        run: |
+          for f in src/App.tsx src/layouts/*.tsx src/features/**/*.tsx src/components/AiHealthIndicator.tsx; do
+            if [ -f "$f" ]; then
+              LINES=$(wc -l < "$f")
+              if [ "$LINES" -gt 400 ]; then
+                echo "ERROR: $f exceeds 400 lines ($LINES)"
+                exit 1
+              fi
+            fi
+          done
+
+      - name: TypeScript & Lint Check (0 errors required)
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Production Bundle Build (Vite)
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run Frontend Component, Sync, RBAC & AI Health Tests
+        working-directory: frontend
+        run: |
+          npm exec -- esbuild tests/ui_verdict_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom --outfile=tests/.ui_test_out.cjs --log-level=error
+          node tests/.ui_test_out.cjs
+          node tests/build_sync_test.mjs
+          node tests/.sync_test_out.cjs
+          npm exec -- esbuild tests/component_sync_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom '--define:import.meta.env={}' --outfile=tests/.component_sync_out.cjs --log-level=error
+          node tests/.component_sync_out.cjs
+          npm exec -- esbuild tests/building_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom '--define:import.meta.env={}' --outfile=tests/.building_out.cjs --log-level=error
+          node tests/.building_out.cjs
+          if [ -f tests/day2_document_rbac_test.tsx ]; then
+            npm exec -- esbuild tests/day2_document_rbac_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom '--define:import.meta.env={}' --outfile=tests/.day2_test_out.cjs --log-level=error
+            node tests/.day2_test_out.cjs
+          fi
+          npm exec -- esbuild tests/package4_ai_health_test.tsx --bundle --platform=node --format=cjs --jsx=automatic --loader:.css=empty --external:jsdom '--define:import.meta.env={}' --outfile=tests/.pkg4_test_out.cjs --log-level=error
+          node tests/.pkg4_test_out.cjs
+          rm -f tests/.ui_test_out.cjs tests/.sync_test_out.cjs tests/.component_sync_out.cjs tests/.building_out.cjs tests/.day2_test_out.cjs tests/.pkg4_test_out.cjs
+
+  docker-validation:
+    name: Docker 1-Click Local & Production Compose Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate compose.local.yaml (1-Click Local Stack)
+        run: |
+          docker compose -f compose.local.yaml config --quiet
+
+      - name: Validate compose.yaml (Production VPS Stack)
+        run: |
+          rm -f .env
+          python3 scripts/configure_env.py --domain pccc.example.com --email ops@example.com
+          docker compose -f compose.yaml config --quiet
+
+      - name: Build Backend & Frontend Docker Images
+        run: |
+          docker compose -f compose.local.yaml build
+
+  deploy-production:
+    name: Deploy to Production VPS (CD)
+    needs: [backend-tests, frontend-quality, docker-validation]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master') && vars.ENABLE_VPS_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Deploy over SSH to Production VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_APP_DIR: ${{ vars.VPS_APP_DIR || '/opt/pccc' }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$VPS_SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          ssh "$VPS_USER@$VPS_HOST" "cd $VPS_APP_DIR && git pull --ff-only && docker compose config --quiet && docker compose up -d --build && docker compose ps"

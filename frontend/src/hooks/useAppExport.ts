@@ -16,7 +16,8 @@ function downloadBlob(blob: Blob, filename: string): void {
 export function useAppExport(
   activeSession: Session | undefined,
   getRevisionHeader: (sid: string) => { "If-Match": string },
-  onError: (msg: string) => void
+  onError: (msg: string) => void,
+  waitReadyForExport?: () => Promise<boolean>
 ) {
   const [isExportingDocx, setIsExportingDocx] = useState(false);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -25,7 +26,11 @@ export function useAppExport(
   const safeFilename = (activeSession?.projectInfo.name || "Cong_trinh").replace(/\s+/g, "_");
 
   const handleExportDocx = useCallback(async () => {
-    if (!activeSession) return;
+    if (waitReadyForExport) {
+      const ready = await waitReadyForExport();
+      if (!ready) return;
+    }
+    if (!activeSession || !activeSession.checklist?.length) return;
     setIsExportingDocx(true);
     try {
       const res = await apiFetch("/api/report/export", {
@@ -43,10 +48,14 @@ export function useAppExport(
     } finally {
       setIsExportingDocx(false);
     }
-  }, [activeSession, getRevisionHeader, safeFilename, onError]);
+  }, [activeSession, getRevisionHeader, safeFilename, onError, waitReadyForExport]);
 
   const handleExportPdf = useCallback(async () => {
-    if (!activeSession) return;
+    if (waitReadyForExport) {
+      const ready = await waitReadyForExport();
+      if (!ready) return;
+    }
+    if (!activeSession || !activeSession.checklist?.length) return;
     setIsExportingPdf(true);
     try {
       const res = await apiFetch("/api/report/export-pdf", {
@@ -64,10 +73,14 @@ export function useAppExport(
     } finally {
       setIsExportingPdf(false);
     }
-  }, [activeSession, getRevisionHeader, safeFilename, onError]);
+  }, [activeSession, getRevisionHeader, safeFilename, onError, waitReadyForExport]);
 
   const handleExportJson = useCallback(async () => {
-    if (!activeSession) return;
+    if (waitReadyForExport) {
+      const ready = await waitReadyForExport();
+      if (!ready) return;
+    }
+    if (!activeSession || !activeSession.checklist?.length) return;
     setIsExportingJson(true);
     try {
       const res = await apiFetch("/api/report/export-json", {
@@ -85,7 +98,7 @@ export function useAppExport(
     } finally {
       setIsExportingJson(false);
     }
-  }, [activeSession, getRevisionHeader, safeFilename, onError]);
+  }, [activeSession, getRevisionHeader, safeFilename, onError, waitReadyForExport]);
 
   return {
     isExportingDocx,
@@ -96,4 +109,3 @@ export function useAppExport(
     handleExportJson,
   };
 }
-

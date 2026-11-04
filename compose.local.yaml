@@ -1,0 +1,84 @@
+# Local 1-Click Docker stack (used by run-docker.bat / stop-docker.bat / logs-docker.bat).
+# Runs alongside compose.yaml (which is reserved for production VPS with Caddy HTTPS).
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pccc_db
+      POSTGRES_USER: pccc_app
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pccc_dev_pass}
+    volumes:
+      - postgres_local_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U pccc_app -d pccc_db']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 1g
+    cpus: 1
+    networks: [pccc]
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    env_file:
+      - path: ./.env
+        required: false
+      - path: ./backend/.env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://pccc_app:${POSTGRES_PASSWORD:-pccc_dev_pass}@postgres:5432/pccc_db
+      PCCC_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000,http://127.0.0.1:8000,http://localhost:3000
+      NODE_ENV: development
+      PORT: 3000
+      PCCC_DATA_DIR: /app/data
+      PCCC_USE_MIGRATIONS: 'true'
+    ports:
+      - '8000:3000'
+    volumes:
+      - pccc_local_data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, curl, -fsS, 'http://localhost:3000/api/ready']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    mem_limit: 1g
+    cpus: 1.5
+    networks: [pccc]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_API_BASE_URL: ''
+        VITE_ENABLE_CODE_PROTECTION: ${VITE_ENABLE_CODE_PROTECTION:-false}
+    restart: unless-stopped
+    ports:
+      - '5173:80'
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      backend:
+        condition: service_healthy
+    mem_limit: 256m
+    cpus: 0.5
+    networks: [pccc]
+
+volumes:
+  postgres_local_data:
+  pccc_local_data:
+
+networks:
+  pccc:
+    ipam:
+      config:
+        - subnet: 172.28.76.0/24

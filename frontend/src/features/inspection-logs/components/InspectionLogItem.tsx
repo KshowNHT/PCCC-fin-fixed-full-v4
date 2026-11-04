@@ -68,14 +68,14 @@ export const InspectionLogItem: React.FC<InspectionLogItemProps> = ({
             <div className="mt-1 flex items-center gap-2">
               {log.appraisalStatus === "required" || log.isSubjectToAppraisal ? (
                 <span className="inline-flex items-center gap-1 text-red-600 text-xs font-bold">
-                  <XCircle className="w-3.5 h-3.5" /> Thuộc diện thẩm duyệt PCCC
+                  <XCircle className="w-3.5 h-3.5" /> Thuộc diện thẩm định PCCC
                 </span>
               ) : log.appraisalStatus === "not_required" ? (
                 <span className="inline-flex items-center gap-1 text-emerald-600 text-xs font-bold">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Dưới ngưỡng danh mục thẩm duyệt
                 </span>
               ) : (
-                <span className="text-amber-700 text-xs font-medium">Cần rà soát bổ sung</span>
+                <span className="text-amber-700 text-xs font-medium">Cần rà soát / chưa đủ căn cứ</span>
               )}
             </div>
           </div>

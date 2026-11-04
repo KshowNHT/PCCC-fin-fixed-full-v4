@@ -6,6 +6,9 @@ import { parseApiErrorMessage } from "../utils/errorParser";
 export function useAppSessions(onError: (msg: string) => void) {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string>("");
+  const activeIdRef = useRef(activeSessionId);
+  activeIdRef.current = activeSessionId;
+
   const [hasMoreSessions, setHasMoreSessions] = useState(false);
   const [nextOffset, setNextOffset] = useState(50);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -13,10 +16,19 @@ export function useAppSessions(onError: (msg: string) => void) {
   const revisions = useRef(new Map<string, string>());
   const saveQueue = useRef<Promise<void>>(Promise.resolve());
   const saveCount = useRef(0);
+  const failedFields = useRef(new Set<string>());
+  const busyRef = useRef(false);
+  const localDraftRef = useRef(false);
+
   const [isSaving, setIsSaving] = useState(false);
   const [hasLocalDraft, setHasLocalDraft] = useState(false);
   const [isPending, setIsPending] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  const markDraft = useCallback(() => {
+    localDraftRef.current = true;
+    setHasLocalDraft(true);
+  }, []);
 
   const revisionHeaders = useCallback((sid: string) => {
     const revision = revisions.current.get(sid);
@@ -30,6 +42,44 @@ export function useAppSessions(onError: (msg: string) => void) {
     });
   }, []);
 
+  const reconcileSession = useCallback(async (sid: string) => {
+    const res = await apiFetch(`/api/sessions/${sid}`);
+    if (!res.ok) throw new Error(await parseApiErrorMessage(res));
+    const data: Session = await res.json();
+    if (data.revision) revisions.current.set(sid, data.revision);
+    setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
+  }, []);
+
+  const createSession = useCallback(async () => {
+    if (busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    try {
+      const res = await apiFetch("/api/sessions", {
+        method: "POST",
+        body: JSON.stringify({ title: `Hồ sơ kiểm duyệt #${Date.now().toString().slice(-4)}` }),
+      });
+      if (!res.ok) throw new Error(await parseApiErrorMessage(res));
+      const newSess: Session = await res.json();
+      if (newSess.revision) revisions.current.set(newSess.id, newSess.revision);
+      setSessions((prev) => [newSess, ...prev]);
+      setActiveSessionId(newSess.id);
+      activeIdRef.current = newSess.id;
+      localDraftRef.current = false;
+      setHasLocalDraft(false);
+      failedFields.current.clear();
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
+      onError("Không thể tạo hồ sơ mới.");
+    } finally {
+      if (isSameAuthSession(token, getToken())) {
+        busyRef.current = false;
+        setIsPending(false);
+      }
+    }
+  }, [onError]);
+
   const fetchSessions = useCallback(async () => {
     try {
       const res = await apiFetch("/api/sessions?limit=50&offset=0");
@@ -42,6 +92,7 @@ export function useAppSessions(onError: (msg: string) => void) {
       if (data.length > 0) {
         setSessions(data);
         setActiveSessionId(data[0].id);
+        activeIdRef.current = data[0].id;
       } else {
         await createSession();
       }
@@ -49,29 +100,41 @@ export function useAppSessions(onError: (msg: string) => void) {
       if (err instanceof Error && err.name === "AbortError") return;
       onError("Không tải được danh sách hồ sơ.");
     }
-  }, [rememberRevisions, onError]);
+  }, [rememberRevisions, createSession, onError]);
 
-  const createSession = useCallback(async () => {
-    setIsPending(true);
-    try {
-      const res = await apiFetch("/api/sessions", {
-        method: "POST",
-        body: JSON.stringify({ title: `Hồ sơ kiểm duyệt #${Date.now().toString().slice(-4)}` }),
-      });
-      if (!res.ok) throw new Error(await parseApiErrorMessage(res));
-      const newSess: Session = await res.json();
-      if (newSess.revision) revisions.current.set(newSess.id, newSess.revision);
-      setSessions((prev) => [newSess, ...prev]);
-      setActiveSessionId(newSess.id);
+  const selectSession = useCallback(async (id: string) => {
+    if (busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    const s = sessions.find((item) => item.id === id);
+    if (s) {
+      setActiveSessionId(id);
+      activeIdRef.current = id;
+      localDraftRef.current = false;
       setHasLocalDraft(false);
-    } catch {
-      onError("Không thể tạo hồ sơ mới.");
-    } finally {
-      setIsPending(false);
+      failedFields.current.clear();
+      onError("");
+      busyRef.current = true;
+      setIsPending(true);
+      try {
+        await reconcileSession(id);
+      } catch (err: unknown) {
+        if (err instanceof Error && err.name !== "AbortError") {
+          failedFields.current.add("__sync__");
+          onError(err.message || "Không tải được hồ sơ mới nhất.");
+        }
+      } finally {
+        if (isSameAuthSession(token, getToken())) {
+          busyRef.current = false;
+          setIsPending(false);
+        }
+      }
     }
-  }, [onError]);
+  }, [sessions, reconcileSession, onError]);
 
   const deleteSession = useCallback(async (id: string) => {
+    if (busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    busyRef.current = true;
     setIsPending(true);
     try {
       const res = await apiFetch(`/api/sessions/${id}`, {
@@ -81,21 +144,28 @@ export function useAppSessions(onError: (msg: string) => void) {
       if (!res.ok) throw new Error(await parseApiErrorMessage(res));
       setSessions((prev) => {
         const next = prev.filter((s) => s.id !== id);
-        if (activeSessionId === id && next.length > 0) setActiveSessionId(next[0].id);
+        if (activeIdRef.current === id && next.length > 0) {
+          setActiveSessionId(next[0].id);
+          activeIdRef.current = next[0].id;
+        }
         return next;
       });
-    } catch {
+    } catch (err: unknown) {
+      if (err instanceof Error && err.name === "AbortError") return;
       onError("Không xóa được hồ sơ.");
     } finally {
-      setIsPending(false);
+      if (isSameAuthSession(token, getToken())) {
+        busyRef.current = false;
+        setIsPending(false);
+      }
     }
-  }, [activeSessionId, revisionHeaders, onError]);
+  }, [revisionHeaders, onError]);
 
   const updateProject = useCallback((info: Partial<ProjectInfo>): Promise<void> => {
-    setHasLocalDraft(true);
-    const sid = activeSessionId;
+    markDraft();
+    const sid = activeIdRef.current;
     const token = getToken();
-    if (!sid) return Promise.resolve();
+    if (!sid || busyRef.current) return Promise.resolve();
     saveCount.current += 1;
     setIsSaving(true);
 
@@ -113,8 +183,15 @@ export function useAppSessions(onError: (msg: string) => void) {
         if (saveCount.current === 1) {
           setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
         }
+        Object.keys(info).forEach((key) => failedFields.current.delete(key));
+        if (activeIdRef.current === sid && saveCount.current === 1 && !failedFields.current.size) {
+          onError("");
+        }
       } catch (err: unknown) {
-        if (err instanceof Error && err.name !== "AbortError") onError(err.message);
+        if (err instanceof Error && err.name !== "AbortError") {
+          Object.keys(info).forEach((key) => failedFields.current.add(key));
+          onError(err.message);
+        }
       } finally {
         saveCount.current -= 1;
         setIsSaving(saveCount.current > 0);
@@ -123,12 +200,29 @@ export function useAppSessions(onError: (msg: string) => void) {
 
     saveQueue.current = next;
     return next;
-  }, [activeSessionId, revisionHeaders, onError]);
+  }, [markDraft, revisionHeaders, onError]);
 
   const triggerAppraisal = useCallback(async () => {
-    const sid = activeSessionId;
-    if (!sid) return;
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    if (busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
     setIsPending(true);
+    await saveQueue.current;
+    if (!isSameAuthSession(operationToken, getToken())) return;
+    if (failedFields.current.size) {
+      busyRef.current = false;
+      setIsPending(false);
+      onError("Thông số chưa kiểm duyệt hoặc chưa lưu được. Hãy sửa và lưu lại trước khi tiếp tục.");
+      return;
+    }
+    const sid = activeIdRef.current;
+    if (!sid) {
+      busyRef.current = false;
+      setIsPending(false);
+      return;
+    }
+    onError("");
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -142,20 +236,46 @@ export function useAppSessions(onError: (msg: string) => void) {
       if (!res.ok) throw new Error(await parseApiErrorMessage(res));
       const data: Session = await res.json();
       if (data.revision) revisions.current.set(sid, data.revision);
-      setHasLocalDraft(false);
-      setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
+      if (data.reviewState === "reviewed") {
+        localDraftRef.current = false;
+        setHasLocalDraft(false);
+      }
+      if (activeIdRef.current === sid) {
+        setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== "AbortError") onError(err.message);
     } finally {
-      setIsPending(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller && isSameAuthSession(operationToken, getToken())) {
+        try {
+          await reconcileSession(sid);
+        } catch (err: unknown) {
+          if (err instanceof Error && err.name !== "AbortError") {
+            failedFields.current.add("__sync__");
+            onError("Chưa xác nhận được trạng thái hồ sơ trên máy chủ. Hãy tải lại trước khi tiếp tục.");
+          }
+        }
+        busyRef.current = false;
+        setIsPending(false);
+        abortControllerRef.current = null;
+      }
     }
-  }, [activeSessionId, revisionHeaders, onError]);
+  }, [revisionHeaders, reconcileSession, onError]);
 
   const sendMessage = useCallback(async (text: string) => {
-    const sid = activeSessionId;
-    if (!sid) return;
+    const sid = activeIdRef.current;
+    if (!sid || busyRef.current) return;
+    const operationToken = getToken();
+    busyRef.current = true;
     setIsPending(true);
+    await saveQueue.current;
+    if (!isSameAuthSession(operationToken, getToken())) return;
+    if (failedFields.current.size) {
+      busyRef.current = false;
+      setIsPending(false);
+      onError("Thông số chưa kiểm duyệt hoặc chưa lưu được. Hãy sửa và lưu lại trước khi tiếp tục.");
+      return;
+    }
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
@@ -169,37 +289,55 @@ export function useAppSessions(onError: (msg: string) => void) {
       if (!res.ok) throw new Error(await parseApiErrorMessage(res));
       const data: Session = await res.json();
       if (data.revision) revisions.current.set(sid, data.revision);
-      setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
+      if (activeIdRef.current === sid) {
+        setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
+      }
     } catch (err: unknown) {
       if (err instanceof Error && err.name !== "AbortError") onError(err.message);
     } finally {
-      setIsPending(false);
-      abortControllerRef.current = null;
+      if (abortControllerRef.current === controller && isSameAuthSession(operationToken, getToken())) {
+        try {
+          await reconcileSession(sid);
+        } catch (err: unknown) {
+          if (err instanceof Error && err.name !== "AbortError") {
+            failedFields.current.add("__sync__");
+            onError("Chưa xác nhận được trạng thái hồ sơ trên máy chủ. Hãy tải lại trước khi tiếp tục.");
+          }
+        }
+        busyRef.current = false;
+        setIsPending(false);
+        abortControllerRef.current = null;
+      }
     }
-  }, [activeSessionId, revisionHeaders, onError]);
+  }, [revisionHeaders, reconcileSession, onError]);
 
   const cancelPending = useCallback(() => {
     abortControllerRef.current?.abort();
   }, []);
 
   const reloadActiveSession = useCallback(async () => {
-    const sid = activeSessionId;
-    if (!sid) return;
+    const sid = activeIdRef.current;
+    if (!sid || busyRef.current || saveCount.current > 0) return;
+    const token = getToken();
+    busyRef.current = true;
     setIsPending(true);
     try {
-      const res = await apiFetch(`/api/sessions/${sid}`);
-      if (!res.ok) throw new Error(await parseApiErrorMessage(res));
-      const data: Session = await res.json();
-      if (data.revision) revisions.current.set(sid, data.revision);
-      setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
+      await reconcileSession(sid);
+      failedFields.current.clear();
+      onError("");
+      localDraftRef.current = false;
       setHasLocalDraft(false);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Không thể tải lại hồ sơ.";
-      onError(msg);
+      if (err instanceof Error && err.name !== "AbortError") {
+        onError(err.message || "Không thể tải lại hồ sơ.");
+      }
     } finally {
-      setIsPending(false);
+      if (isSameAuthSession(token, getToken())) {
+        busyRef.current = false;
+        setIsPending(false);
+      }
     }
-  }, [activeSessionId, onError]);
+  }, [reconcileSession, onError]);
 
   const renameSession = useCallback(
     async (id: string, newName: string) => {
@@ -223,16 +361,39 @@ export function useAppSessions(onError: (msg: string) => void) {
     [revisionHeaders, onError]
   );
 
+  const waitReadyForExport = useCallback(async (): Promise<boolean> => {
+    if (busyRef.current) return false;
+    const operationToken = getToken();
+    busyRef.current = true;
+    setIsPending(true);
+    await saveQueue.current;
+    if (!isSameAuthSession(operationToken, getToken())) {
+      busyRef.current = false;
+      setIsPending(false);
+      return false;
+    }
+    if (failedFields.current.size || localDraftRef.current) {
+      busyRef.current = false;
+      setIsPending(false);
+      onError("Thông số chưa kiểm duyệt hoặc chưa lưu được. Nhập xong và bấm Kiểm duyệt hồ sơ trước khi xuất.");
+      return false;
+    }
+    busyRef.current = false;
+    setIsPending(false);
+    return true;
+  }, [onError]);
+
   return {
     sessions,
     setSessions,
     activeSessionId,
-    setActiveSessionId,
+    setActiveSessionId: selectSession,
     activeSession: sessions.find((s) => s.id === activeSessionId),
     hasMoreSessions,
     loadingHistory,
     isSaving,
     hasLocalDraft,
+    markDraft,
     isPending,
     fetchSessions,
     createSession,
@@ -244,5 +405,6 @@ export function useAppSessions(onError: (msg: string) => void) {
     sendMessage,
     cancelPending,
     revisionHeaders,
+    waitReadyForExport,
   };
 }

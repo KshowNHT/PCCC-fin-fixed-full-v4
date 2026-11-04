@@ -20,26 +20,39 @@ from app.rules_engine import (
     get_rag_context_for_project,
 )
 from app.checklist_data import STANDARDS_CHECKLIST_TEMPLATE
+from app import config as app_config
 from app.config import GEMINI_API_KEY
 from app.models import DeepAppraisalResponse
 
 logger = logging.getLogger("pccc.gemini")
 
 _ai_client: Optional[genai.Client] = None
+_ai_client_key: Optional[str] = None
 
 import os
-MODELS_TO_TRY = [m.strip() for m in os.getenv("GEMINI_MODELS", "gemini-3.8-flash").split(",") if m.strip()]
+_raw_models = [m.strip() for m in os.getenv("GEMINI_MODELS", "gemini-2.5-flash,gemini-2.0-flash").split(",") if m.strip()]
+_configured_models: List[str] = []
+for _m in _raw_models:
+    _mapped = "gemini-2.5-flash" if _m == "gemini-3.8-flash" else _m
+    if _mapped not in _configured_models:
+        _configured_models.append(_mapped)
+for _fallback_model in ("gemini-2.5-flash", "gemini-2.0-flash"):
+    if _fallback_model not in _configured_models:
+        _configured_models.append(_fallback_model)
+MODELS_TO_TRY = _configured_models
 
 
 def get_ai() -> genai.Client:
-    global _ai_client
-    if not GEMINI_API_KEY:
+    global _ai_client, _ai_client_key
+    api_key = (app_config.GEMINI_API_KEY or os.environ.get("GEMINI_API_KEY", "")).strip()
+    if not api_key:
         raise RuntimeError("Missing GEMINI_API_KEY environment variable")
-    if _ai_client is None:
+    if _ai_client is None or _ai_client_key != api_key:
         _ai_client = genai.Client(
-            api_key=GEMINI_API_KEY,
+            api_key=api_key,
             http_options=types.HttpOptions(timeout=25000),
         )
+        _ai_client_key = api_key
     return _ai_client
 
 
@@ -80,7 +93,12 @@ async def generate_content_with_retry(contents: Any, config: types.GenerateConte
         for model in MODELS_TO_TRY[:2]:
             for attempt in range(2):
                 try:
-                    return await client.aio.models.generate_content(model=model, contents=contents, config=config)
+                    return await asyncio.to_thread(
+                        client.models.generate_content,
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
                 except Exception as err:
                     code = getattr(err, "code", None) or getattr(err, "status_code", None)
                     if code in (401, 403):

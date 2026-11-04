@@ -13,6 +13,8 @@ interface SpecsScaleFieldsProps {
   setLocalFloorArea: (val: string | number) => void;
   localTotalFloorArea: string | number;
   setLocalTotalFloorArea: (val: string | number) => void;
+  localVolume?: string | number;
+  setLocalVolume?: (val: string | number) => void;
   localFireRating: string;
   setLocalFireRating: (val: string) => void;
   localCommDetails: string;
@@ -55,8 +57,8 @@ const ScaleInput: React.FC<ScaleInputProps> = ({ id, label, value, placeholder, 
 export const SpecsScaleFields: React.FC<SpecsScaleFieldsProps> = ({
   localFloors, setLocalFloors, localBasements, setLocalBasements,
   localPcccHeight, setLocalPcccHeight, localFloorArea, setLocalFloorArea,
-  localTotalFloorArea, setLocalTotalFloorArea, localFireRating, setLocalFireRating,
-  localCommDetails, setLocalCommDetails, onCommitField,
+  localTotalFloorArea, setLocalTotalFloorArea, localVolume = "", setLocalVolume,
+  localFireRating, setLocalFireRating, localCommDetails, setLocalCommDetails, onCommitField,
 }) => {
   return (
     <div className="space-y-3">
@@ -69,6 +71,7 @@ export const SpecsScaleFields: React.FC<SpecsScaleFieldsProps> = ({
         <ScaleInput id="spec-floors" label="Số tầng nổi" value={localFloors} placeholder="4" max={200} onChange={setLocalFloors} onBlur={() => onCommitField("floors", Number(localFloors) || 0)} />
         <ScaleInput id="spec-basements" label="Số tầng hầm" value={localBasements} placeholder="0" max={20} onChange={setLocalBasements} onBlur={() => onCommitField("basements", Number(localBasements) || 0)} />
         <ScaleInput id="spec-pccc-height" label="Chiều cao PCCC (m)" value={localPcccHeight} placeholder="12" max={1000} step="0.1" onChange={setLocalPcccHeight} onBlur={() => onCommitField("pcccHeight", Number(localPcccHeight) || 0)} />
+        <ScaleInput id="spec-volume" label="Khối tích (m³)" value={localVolume} placeholder="1500" max={100000000} onChange={(val) => setLocalVolume?.(val)} onBlur={() => onCommitField("volume", Number(localVolume) || 0)} />
 
         <div>
           <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">Bậc chịu lửa</label>

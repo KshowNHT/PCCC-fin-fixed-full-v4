@@ -33,7 +33,8 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
       name: form.localName, type: form.localType, investor: form.localInvestor, location: form.localLocation,
       floors: Number(form.localFloors) || 0, basements: Number(form.localBasements) || 0,
       pcccHeight: Number(form.localPcccHeight) || 0, floorArea: Number(form.localFloorArea) || 0,
-      totalFloorArea: Number(form.localTotalFloorArea) || 0, fireRating: form.localFireRating,
+      totalFloorArea: Number(form.localTotalFloorArea) || 0, volume: Number(form.localVolume) || 0,
+      fireRating: form.localFireRating,
       commercialDetails: form.localCommDetails,
     });
     onTriggerAppraisal();
@@ -67,8 +68,8 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
                 Hồ sơ có {project.components.length} hạng mục độc lập. Thông số từng hạng mục được quản lý bên dưới.
               </div>
             )}
-            <SpecsGeneralFields localName={form.localName} setLocalName={form.setLocalName} localInvestor={form.localInvestor} setLocalInvestor={form.setLocalInvestor} localLocation={form.localLocation} setLocalLocation={form.setLocalLocation} localType={form.localType} setLocalType={form.setLocalType} onCommitField={form.handleCommitField} />
-            <SpecsScaleFields localFloors={form.localFloors} setLocalFloors={form.setLocalFloors} localBasements={form.localBasements} setLocalBasements={form.setLocalBasements} localPcccHeight={form.localPcccHeight} setLocalPcccHeight={form.setLocalPcccHeight} localFloorArea={form.localFloorArea} setLocalFloorArea={form.setLocalFloorArea} localTotalFloorArea={form.localTotalFloorArea} setLocalTotalFloorArea={form.setLocalTotalFloorArea} localFireRating={form.localFireRating} setLocalFireRating={form.setLocalFireRating} localCommDetails={form.localCommDetails} setLocalCommDetails={form.setLocalCommDetails} onCommitField={form.handleCommitField} />
+            <SpecsGeneralFields localName={form.localName} setLocalName={form.setLocalName} localInvestor={form.localInvestor} setLocalInvestor={form.setLocalInvestor} localLocation={form.localLocation} localType={form.localType} setLocalType={form.setLocalType} setLocalLocation={form.setLocalLocation} onCommitField={form.handleCommitField} />
+            <SpecsScaleFields localFloors={form.localFloors} setLocalFloors={form.setLocalFloors} localBasements={form.localBasements} setLocalBasements={form.setLocalBasements} localPcccHeight={form.localPcccHeight} setLocalPcccHeight={form.setLocalPcccHeight} localFloorArea={form.localFloorArea} setLocalFloorArea={form.setLocalFloorArea} localTotalFloorArea={form.localTotalFloorArea} setLocalTotalFloorArea={form.setLocalTotalFloorArea} localVolume={form.localVolume} setLocalVolume={form.setLocalVolume} localFireRating={form.localFireRating} setLocalFireRating={form.setLocalFireRating} localCommDetails={form.localCommDetails} setLocalCommDetails={form.setLocalCommDetails} onCommitField={form.handleCommitField} />
             <FloorFunctionsSubform floorsCount={Number(form.localFloors) || 0} floorFunctions={form.floorFunctions} onChangeFloorFunction={form.handleFloorFunctionChange} />
             <BasementFunctionsSubform basementsCount={Number(form.localBasements) || 0} functions={form.basementFunctions} heights={form.basementHeights} areas={form.basementAreas} footprints={form.basementFootprints} onChangeField={form.handleBasementFieldChange} />
             <BuildingEditor project={project} onUpdate={onUpdateProject} />

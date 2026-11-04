@@ -27,6 +27,7 @@ export function useInspectionLogs({ sessionId }: UseInspectionLogsProps) {
           throw new Error("Không tải được nhật ký kiểm tra. Vui lòng thử lại.");
         }
         const data = (await res.json()) as unknown;
+        if (signal?.aborted) return;
         if (!Array.isArray(data)) {
           throw new Error("Dữ liệu nhật ký không đúng định dạng danh sách.");
         }

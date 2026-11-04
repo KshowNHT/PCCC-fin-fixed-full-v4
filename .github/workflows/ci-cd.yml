@@ -50,10 +50,14 @@ jobs:
           fi
 
       - name: Run Full Backend Unittest Suite (Operations, Components, Migrations)
+        env:
+          PYTHONPATH: backend
         run: |
           python -m unittest discover -s backend/tests -p "test_*.py" -v
 
       - name: Run 3,000 Fuzzing Scenarios Explicitly
+        env:
+          PYTHONPATH: backend
         run: |
           python backend/tests/test_rules_fuzz.py
 
@@ -74,6 +78,8 @@ jobs:
           cache-dependency-path: backend/requirements-lock.txt
 
       - name: Generate UI Test Fixtures
+        env:
+          PYTHONPATH: backend
         run: |
           pip install -r backend/requirements-lock.txt
           python backend/tests/make_ui_fixtures.py

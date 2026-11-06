@@ -59,9 +59,9 @@ export const MobileActionsList: React.FC<MobileActionsListProps> = ({
           type="button"
           disabled={isPending || hasAreaContradiction}
           onClick={() => { onTriggerAppraisal(); onClose(); }}
-          className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-brand-orange hover:bg-orange-600 disabled:opacity-50 text-white font-bold shadow-xs transition-all cursor-pointer"
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-100 font-semibold shadow-xs transition-all cursor-pointer disabled:opacity-50"
         >
-          {isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
+          {isPending ? <Loader2 className="w-4 h-4 animate-spin text-brand-orange" /> : <Sparkles className="w-4 h-4 text-brand-orange" />}
           <span>Kiểm duyệt hồ sơ</span>
         </button>
 

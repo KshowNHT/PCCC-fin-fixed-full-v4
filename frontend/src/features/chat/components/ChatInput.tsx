@@ -96,7 +96,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
             placeholder="Hỏi về quy chuẩn PCCC, quy mô công trình, hoặc yêu cầu thẩm duyệt..."
-            className="flex-1 max-h-40 py-1.5 px-2 bg-transparent text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm outline-none resize-none font-sans leading-relaxed custom-scrollbar"
+            className="flex-1 min-w-0 max-h-40 py-1.5 px-2 bg-transparent text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm outline-none resize-none font-sans leading-relaxed break-words [overflow-wrap:anywhere] custom-scrollbar"
           />
 
           {isPending ? (

@@ -29,10 +29,10 @@ export const SpecsSummaryBar: React.FC<SpecsSummaryBarProps> = ({
         type="button"
         disabled={disabled}
         onClick={onOpenDrawer}
-        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200/70 dark:hover:bg-slate-700/80 text-slate-700 dark:text-slate-200 text-xs font-semibold transition-all cursor-pointer border border-slate-200/80 dark:border-slate-700 shadow-xs min-w-0 shrink-0"
+        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-brand-orange hover:bg-orange-600 text-white text-xs font-bold transition-all cursor-pointer border border-brand-orange shadow-xs min-w-0 shrink-0 disabled:opacity-50"
         title="Bấm để mở bảng điều chỉnh thông số công trình"
       >
-        <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
+        <SlidersHorizontal className="w-3.5 h-3.5 text-white shrink-0" />
         <span className="truncate max-w-[90px] sm:max-w-[100px] xl:max-w-[100px] 2xl:max-w-[220px]">
           {summaryParts.join(" • ")}
         </span>

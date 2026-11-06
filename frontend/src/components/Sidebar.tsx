@@ -260,14 +260,28 @@ export function Sidebar({
     }
   };
 
+  const normalizeDocText = (s: string) => {
+    if (!s) return "";
+    return s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "d")
+      .toLowerCase()
+      .replace(/[\s_\-:/]+/g, " ")
+      .trim();
+  };
+
   const filteredDocuments = searchResults !== null ? searchResults : documents.filter((doc) => {
-    const q = docSearchQuery.toLowerCase().trim();
-    if (!q) return true;
-    return (
-      (doc.code && doc.code.toLowerCase().includes(q)) ||
-      (doc.title && doc.title.toLowerCase().includes(q)) ||
-      (doc.content && doc.content.toLowerCase().includes(q))
-    );
+    const normQ = normalizeDocText(docSearchQuery);
+    if (!normQ) return true;
+    const normCode = normalizeDocText(doc.code);
+    const normTitle = normalizeDocText(doc.title);
+    const normContent = doc.content ? normalizeDocText(doc.content) : "";
+    const combined = `${normCode} ${normTitle} ${normContent}`;
+    if (combined.includes(normQ)) return true;
+    const tokens = normQ.split(" ").filter(Boolean);
+    return tokens.length > 0 && tokens.every((t) => combined.includes(t));
   });
 
   return (

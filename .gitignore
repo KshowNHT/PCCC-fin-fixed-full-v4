@@ -154,6 +154,8 @@ run_79_audit.py
 testcase_data.py
 backend/tests/test_def_improvements.py
 backend/tests/test_rag_pipeline.py
+backend/tests/test_document_upload_integration.py
+backend/tests/verify_search_rag.py
 Bao_Cao_Ket_Qua_*.docx
 
 Ke_hoach_Rut_Gon_14_Ngay_PCCC.docx

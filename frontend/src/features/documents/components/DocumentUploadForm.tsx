@@ -10,18 +10,65 @@ interface DocumentUploadFormProps {
 export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({ onUpload, isUploading }) => {
   const [code, setCode] = useState("");
   const [title, setTitle] = useState("");
-  const [docType, setDocType] = useState("TCVN");
+  const [docType, setDocType] = useState("Tự động");
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [error, setError] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const parseFilenameMeta = (filename: string) => {
+    const stem = filename.replace(/\.[^/.]+$/, "").replace(/[_\-]+/g, " ").trim();
+    let detectedCode = "";
+    let detectedType = "Tự động";
+
+    if (/luật\s+(?:pccc|phòng\s+cháy)/i.test(stem)) {
+      detectedCode = "Luật PCCC & CNCH";
+      detectedType = "LUẬT";
+    } else {
+      const m = stem.match(/\b(TCVN|QCVN|QC|NĐ|ND|TT)\s*[:\-_/.]?\s*([0-9]+(?:\s*[:\-_/.\s]\s*[0-9]+)*)/i);
+      if (m) {
+        let prefix = m[1].toUpperCase();
+        if (prefix === "QC") prefix = "QCVN";
+        const parts = m[2].split(/[:\-_/.\s]+/).filter(Boolean);
+        if (prefix === "TCVN" || prefix === "QCVN") {
+          detectedType = prefix;
+          const yearIdx = parts.findIndex((p) => p.length === 4 && !isNaN(Number(p)) && Number(p) >= 1950 && Number(p) <= 2050);
+          if (yearIdx > 0) {
+            detectedCode = `${prefix} ${parts.slice(0, yearIdx).join("-")}:${parts[yearIdx]}`;
+          } else {
+            detectedCode = `${prefix} ${parts.join("-")}`;
+          }
+        } else if (prefix === "NĐ" || prefix === "ND") {
+          detectedType = "Nghị định";
+          detectedCode = `${m[2]}/NĐ-CP`;
+        } else if (prefix === "TT") {
+          detectedType = "Thông tư";
+          detectedCode = `${m[2]}/TT-BCA`;
+        }
+      }
+    }
+
+    return {
+      code: detectedCode,
+      title: stem,
+      type: detectedType,
+    };
+  };
 
   const handleSelectFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
     const list = e.target.files;
     if (!list || list.length === 0) return;
     setError("");
     setSuccessMsg("");
-    setSelectedFiles(Array.from(list));
+    const fileArray = Array.from(list);
+    setSelectedFiles(fileArray);
+
+    if (fileArray.length === 1) {
+      const meta = parseFilenameMeta(fileArray[0].name);
+      if (meta.code && !code) setCode(meta.code);
+      if (meta.title && !title) setTitle(meta.title);
+      if (meta.type !== "Tự động") setDocType(meta.type);
+    }
   };
 
   const handlePerformUpload = async () => {
@@ -37,8 +84,9 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({ onUpload
       setTitle("");
       setSelectedFiles([]);
       if (inputRef.current) inputRef.current.value = "";
-      setSuccessMsg(`Đã nạp thành công ${res.length} văn bản vào Thư viện RAG!`);
-      setTimeout(() => setSuccessMsg(""), 4000);
+      const count = Array.isArray(res) ? res.length : (res ? 1 : selectedFiles.length);
+      setSuccessMsg(`Đã nạp thành công ${count} văn bản vào Thư viện RAG!`);
+      setTimeout(() => setSuccessMsg(""), 6000);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Lỗi tải file";
       setError(msg);
@@ -88,7 +136,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({ onUpload
           onChange={(e) => setDocType(e.target.value)}
           className="px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs outline-none focus:border-brand-orange text-slate-900 font-medium"
         >
-          {["TCVN", "QCVN", "Nghị định", "Thông tư", "LUẬT", "Khác"].map((t) => (
+          {["Tự động", "QCVN", "TCVN", "Nghị định", "Thông tư", "LUẬT", "Khác"].map((t) => (
             <option key={t} value={t} className="text-slate-900 bg-white">{t}</option>
           ))}
         </select>

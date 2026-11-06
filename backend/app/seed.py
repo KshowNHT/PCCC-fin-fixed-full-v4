@@ -9,6 +9,9 @@ import logging
 
 from sqlalchemy import func, select, text
 
+from pathlib import Path
+from typing import Dict, Optional
+
 from app.auth import hash_password
 from app.config import DEFAULT_ADMIN_PASSWORD, DEFAULT_ADMIN_USERNAME
 from app.db import AsyncSessionLocal
@@ -16,6 +19,60 @@ from app.db_models import Document, User
 from app.default_documents import DEFAULT_DOCUMENTS
 
 logger = logging.getLogger("pccc.seed")
+
+QC_TC_DOC_MAPPING: Dict[str, str] = {
+    "doc_5": "QCVN 02-2020 Tram bom nuoc chua chay.pdf",
+    "doc_4": "QCVN 01-2020.pdf",
+    "doc_8": "QC13.2018.pdf",
+    "doc_7": "QCVN 10.docx",
+    "doc_6": "Sửa đổi 1 2023 QCVN 06 2022.pdf",
+    "doc_17": "TCVN 13456-2022 PCCC phuong tien chieu sang su co va chi dan thoat nan yeu cau thiet ke lap dat.pdf",
+    "doc_18": "TCVN 14496-2025-pccc-he-thong-chua-chay-tu-dong-bang-nuoc-cho-nha-kho.pdf",
+    "doc_10": "TCVN 5687 - 2024 - ThongGio, DHKK.pdf",
+    "doc_12": "TCVN 7161_9_2009 [Dep].pdf",
+    "doc_13": "TCVN 7336_2021.doc",
+    "doc_15": "TCVN 7568-14.2025 - Bao chay tu dong.pdf",
+    "doc_16": "TCVN 9385- 2012 - CHONG SET.pdf",
+    "doc_9": "TCVN_2622-1995.pdf",
+    "doc_14": "TCVN 7435_1_2004.pdf",
+    "doc_2": "Nghị định 105 mới 2025/Nghị định 105 ngày 15.5.2025.docx",
+    "doc_19": "TCVN_12110_2018.doc",
+    "doc_20": "TCVN_13333-2021.doc",
+    "doc_21": "TCVN_13657_1_2023.docx",
+    "doc_22": "TCVN_7568_25_2023.doc",
+}
+
+
+def _load_document_text_from_file(doc_id: str, default_content: str) -> str:
+    rel_path = QC_TC_DOC_MAPPING.get(doc_id)
+    if not rel_path:
+        return default_content
+
+    base_dir = Path(r"D:\PCCC_doc\QC -TC")
+    full_path = base_dir / rel_path
+    if not full_path.exists():
+        return default_content
+
+    try:
+        from app.doc_extract import extract_doc, extract_docx, extract_pdf, sanitize_text
+
+        ext = full_path.suffix.lower()
+        if ext == ".pdf":
+            raw = extract_pdf(str(full_path), full_path.name)
+        elif ext == ".docx":
+            raw = extract_docx(str(full_path))
+        elif ext == ".doc":
+            raw = extract_doc(str(full_path))
+        else:
+            return default_content
+
+        clean = sanitize_text(raw)
+        if len(clean) > 200:
+            return clean
+    except Exception as e:
+        logger.warning("Không nạp được toàn văn cho %s từ %s: %s", doc_id, full_path, e)
+
+    return default_content
 
 
 async def seed_initial_data() -> None:
@@ -31,13 +88,6 @@ async def seed_initial_data() -> None:
                 role="admin",
             )
             db.add(admin)
-            # SECURITY FIX (rà soát "sẵn sàng chạy online" lần 4): trước đây
-            # log dòng này IN LUÔN MẬT KHẨU ra log ứng dụng (%s thứ 2 =
-            # DEFAULT_ADMIN_PASSWORD) — log container thường được nhiều hệ
-            # thống/nhiều người truy cập hơn cả file .env (log aggregation,
-            # `docker compose logs`, cloud provider log viewer...). Người vận
-            # hành đã tự đặt mật khẩu này trong .env của họ — không cần in
-            # lại, chỉ xác nhận đã tạo xong tài khoản.
             logger.info(
                 "[Seed] Đã tạo tài khoản admin mặc định: %s (dùng mật khẩu đã đặt trong PCCC_ADMIN_PASSWORD ở .env). "
                 "Đổi mật khẩu ngay sau lần đăng nhập đầu qua PUT /api/auth/me/password.",
@@ -47,6 +97,7 @@ async def seed_initial_data() -> None:
         doc_count = (await db.execute(select(func.count()).select_from(Document))).scalar_one()
         if doc_count == 0:
             for d in DEFAULT_DOCUMENTS:
+                content = _load_document_text_from_file(d["id"], d["content"])
                 db.add(
                     Document(
                         id=d["id"],
@@ -54,19 +105,30 @@ async def seed_initial_data() -> None:
                         title=d["title"],
                         type=d["type"],
                         link=d["link"],
-                        content=d["content"],
+                        content=content,
                         is_custom=False,
                     )
                 )
             logger.info("[Seed] Đã nạp %d tài liệu pháp lý mặc định vào PostgreSQL.", len(DEFAULT_DOCUMENTS))
 
-        # Remove legacy generated summaries from existing v10 seeded documents.
-        # Preserve customer uploaded custom documents and all identities.
+        # Đồng bộ và cập nhật văn bản toàn văn thực thụ (thay thế placeholder tóm tắt cũ)
         for item in DEFAULT_DOCUMENTS:
             existing = await db.get(Document, item["id"])
-            if existing is None and item["id"] == "doc_nd347_2026":
-                db.add(Document(id=item["id"], code=item["code"], title=item["title"], type=item["type"],
-                                link=item["link"], content=item["content"], is_custom=False))
-            if existing and not existing.is_custom:
-                existing.content = item["content"]
+            if existing is None:
+                content = _load_document_text_from_file(item["id"], item["content"])
+                db.add(Document(
+                    id=item["id"],
+                    code=item["code"],
+                    title=item["title"],
+                    type=item["type"],
+                    link=item["link"],
+                    content=content,
+                    is_custom=False,
+                ))
+            elif not existing.is_custom:
+                # Nếu nội dung cũ là placeholder hoặc có file toàn văn chi tiết hơn từ thư mục QC-TC
+                loaded = _load_document_text_from_file(item["id"], item["content"])
+                if len(loaded) > len(existing.content or "") or "chưa có toàn văn" in (existing.content or ""):
+                    existing.content = loaded
+
         await db.commit()

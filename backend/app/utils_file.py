@@ -53,6 +53,17 @@ RAG_STOPWORDS = {
     "và", "hoặc", "khi", "nào", "ở", "tại", "mới", "đã", "này", "bởi",
 }
 
+import unicodedata
+
+
+def strip_vietnamese_accents(text: str) -> str:
+    """Loại bỏ dấu tiếng Việt để tìm kiếm & so khớp không phân biệt dấu (accent-insensitive)."""
+    if not text:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", text)
+    no_combining = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return no_combining.replace("đ", "d").replace("Đ", "D").replace("Ð", "D")
+
 
 def _extract_snippet(content: str, query: str, max_chars: int = 350) -> str:
     """Trích đoạn văn bản xung quanh từ khóa tìm kiếm (snippet highlight) (Ngày 3 kế hoạch)."""
@@ -112,6 +123,21 @@ def _extract_snippet(content: str, query: str, max_chars: int = 350) -> str:
                 idx = p
                 break
 
+    # 5. Fallback tìm kiếm không dấu (accent-insensitive)
+    if idx == -1:
+        stripped_content = strip_vietnamese_accents(lower_content)
+        stripped_query = strip_vietnamese_accents(lower_query)
+        pos = stripped_content.find(stripped_query)
+        if pos != -1:
+            idx = pos
+        else:
+            stripped_topical = [strip_vietnamese_accents(t) for t in topical_tokens if len(t) >= 3]
+            for st in stripped_topical:
+                p = stripped_content.find(st)
+                if p != -1:
+                    idx = p
+                    break
+
     if idx == -1:
         idx = 0
 
@@ -162,6 +188,21 @@ def _extract_rich_context(content: str, query: str, max_chars: int = 2500) -> st
                 best_pos = b_start
         if max_score > 0 and best_pos != -1:
             idx = best_pos
+
+    # 3. Fallback tìm cụm từ hoặc từ khóa không dấu (accent-insensitive)
+    if idx == -1:
+        stripped_content = strip_vietnamese_accents(lower_content)
+        stripped_query = strip_vietnamese_accents(lower_query)
+        p = stripped_content.find(stripped_query)
+        if p != -1:
+            idx = p
+        else:
+            stripped_topical = [strip_vietnamese_accents(t) for t in topical_tokens if len(t) >= 3]
+            for st in stripped_topical:
+                p = stripped_content.find(st)
+                if p != -1:
+                    idx = p
+                    break
 
     if idx == -1:
         preamble = re.search(r"(?i)(?:phạm vi áp dụng|quy định chung|1\.\s+phạm vi)", lower_content)

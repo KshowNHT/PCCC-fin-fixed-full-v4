@@ -168,12 +168,52 @@ DEFAULT_DOCUMENTS = [
     },
 ]
 
-# v11: These legacy entries are summaries, not verified full legal texts. Keep metadata
-# for compatibility but do not seed generated summaries as authoritative RAG evidence.
-for _document in DEFAULT_DOCUMENTS:
-    _document["content"] = "Tài liệu tham khảo chưa có toàn văn được xác minh. Quản trị viên cần nạp văn bản chính thức còn hiệu lực trước khi dùng làm căn cứ tư vấn."
-
-DEFAULT_DOCUMENTS.append({"id": "doc_nd347_2026", "code": "347/2026/NĐ-CP",
+DEFAULT_DOCUMENTS.append({
+    "id": "doc_nd347_2026",
+    "code": "347/2026/NĐ-CP",
     "title": "Nghị định sửa đổi Nghị định 105/2025 — Phụ lục III thay thế từ 15/9/2026",
-    "type": "Nghị định", "link": "https://vanban.chinhphu.vn/?docid=219411&pageid=27160",
-    "content": "Metadata nguồn chính thức. Bộ quy tắc quy mô đối chiếu Phụ lục III thay thế; cần đọc toàn văn và quy định chuyển tiếp trước quyết định pháp lý.", "isCustom": False})
+    "type": "Nghị định",
+    "link": "https://vanban.chinhphu.vn/?docid=219411&pageid=27160",
+    "content": "Metadata nguồn chính thức. Bộ quy tắc quy mô đối chiếu Phụ lục III thay thế; cần đọc toàn văn và quy định chuyển tiếp trước quyết định pháp lý.",
+    "isCustom": False,
+})
+
+DEFAULT_DOCUMENTS.append({
+    "id": "doc_19",
+    "code": "TCVN 12110:2018",
+    "title": "Phòng cháy chữa cháy - Bơm ly tâm chữa cháy",
+    "type": "TCVN",
+    "link": "#",
+    "content": "Tiêu chuẩn quốc gia quy định yêu cầu kỹ thuật và phương pháp thử cho các loại bơm ly tâm dẫn động bằng động cơ đốt trong hoặc động cơ điện phục vụ cấp nước chữa cháy.",
+    "isCustom": False,
+})
+
+DEFAULT_DOCUMENTS.append({
+    "id": "doc_20",
+    "code": "TCVN 13333:2021",
+    "title": "Hệ thống chữa cháy bằng sol khí - Yêu cầu thiết kế, lắp đặt, kiểm tra và bảo dưỡng",
+    "type": "TCVN",
+    "link": "#",
+    "content": "Tiêu chuẩn quy định yêu cầu thiết kế, lắp đặt, nghiệm thu và bảo dưỡng hệ thống chữa cháy bằng sol khí (aerosol) bảo vệ phòng máy móc, trạm biến áp, tủ điện.",
+    "isCustom": False,
+})
+
+DEFAULT_DOCUMENTS.append({
+    "id": "doc_21",
+    "code": "TCVN 13657-1:2023",
+    "title": "Phòng cháy chữa cháy - Trạm biến áp - Phần 1: Yêu cầu thiết kế",
+    "type": "TCVN",
+    "link": "#",
+    "content": "Tiêu chuẩn quy định các yêu cầu thiết kế an toàn PCCC, khoảng cách an toàn, tường ngăn cháy và hệ thống chữa cháy cho các trạm biến áp trong nhà và ngoài trời.",
+    "isCustom": False,
+})
+
+DEFAULT_DOCUMENTS.append({
+    "id": "doc_22",
+    "code": "TCVN 7568-25:2023",
+    "title": "Hệ thống báo cháy - Phần 25: Thiết bị sử dụng đường truyền vô tuyến",
+    "type": "TCVN",
+    "link": "#",
+    "content": "Tiêu chuẩn quy định yêu cầu kỹ thuật cho các thiết bị báo cháy không dây, truyền tín hiệu vô tuyến giữa các đầu báo và tủ trung tâm báo cháy.",
+    "isCustom": False,
+})

@@ -99,7 +99,17 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
 
   if (!isOpen) return null;
 
-  const normalizeText = (s: string) => s.toLowerCase().replace(/[\s_\-:/]+/g, " ").trim();
+  const normalizeText = (s: string) => {
+    if (!s) return "";
+    return s
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/đ/g, "d")
+      .replace(/Đ/g, "d")
+      .toLowerCase()
+      .replace(/[\s_\-:/]+/g, " ")
+      .trim();
+  };
   const normSearch = normalizeText(search);
 
   const displayList = searchResults !== null ? searchResults : documents.filter((d) => {
@@ -107,16 +117,19 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
     const normCode = normalizeText(d.code);
     const normTitle = normalizeText(d.title);
     const normContent = d.content ? normalizeText(d.content) : "";
-    return normCode.includes(normSearch) || normTitle.includes(normSearch) || normContent.includes(normSearch);
+    const combined = `${normCode} ${normTitle} ${normContent}`;
+    if (combined.includes(normSearch)) return true;
+    const tokens = normSearch.split(" ").filter(Boolean);
+    return tokens.length > 0 && tokens.every((t) => combined.includes(t));
   });
 
   const handleUploadWrapper = async (files: File[], code: string, title: string, type: string) => {
     setIsUploading(true);
     try {
       const res = await onUploadDocument(files, code, title, type);
-      if (res && res.length > 0) {
-        setSearchResults((prev) => (prev ? [...res, ...prev.filter((p) => !res.some((r) => r.id === p.id))] : null));
-      }
+      // Xóa ô tìm kiếm để tài liệu vừa nạp lập tức hiển thị nổi bật trên danh sách
+      setSearch("");
+      setSearchResults(null);
       setRefreshTrigger((k) => k + 1);
       return res;
     } finally {
@@ -192,6 +205,11 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
                     <div className="flex items-center gap-2">
                       <span className="font-bold text-slate-900 font-mono">{doc.code}</span>
                       <span className="px-1.5 py-0.2 rounded text-[10px] bg-slate-100 text-slate-600 font-bold">{doc.type}</span>
+                      {doc.isCustom && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] bg-emerald-100 text-emerald-700 font-bold uppercase">
+                          Tải lên
+                        </span>
+                      )}
                       {doc.matchType && (
                         <span className="px-1.5 py-0.2 rounded text-[9px] bg-brand-orange/10 text-brand-orange font-bold uppercase">
                           Khớp: {doc.matchType === "code" ? "Mã hiệu" : doc.matchType === "title" ? "Tiêu đề" : "Nội dung"}
@@ -209,7 +227,10 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
                   <div className="flex items-center gap-1 shrink-0">
                     <button
                       type="button"
-                      onClick={() => setPreviewDoc(doc)}
+                      onClick={() => {
+                        const full = documents.find((d) => d.id === doc.id);
+                        setPreviewDoc(full && full.content ? { ...doc, content: full.content } : doc);
+                      }}
                       className="p-1.5 text-slate-400 hover:text-brand-orange rounded cursor-pointer transition-colors"
                       title="Xem trực tiếp PDF"
                     >

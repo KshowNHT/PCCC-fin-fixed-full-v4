@@ -229,6 +229,70 @@ def extract_pdf(path: str, original_filename: str) -> str:
         raise
 
 
+async def extract_pdf_async(path: str, original_filename: str) -> str:
+    """Trích xuất PDF có hỗ trợ tự động bóc tách trang scan bằng Vision OCR (DEF-03)."""
+    try:
+        reader = PdfReader(path)
+        text = "\n".join((page.extract_text() or "") for page in reader.pages)
+        if len(text.strip()) > 80:
+            return _clean_extracted_text(convert_tcvn3_to_unicode(text))
+    except Exception as e:
+        logger.warning("pypdf đọc text thất bại, chuyển sang kiểm tra scan OCR: %s", e)
+
+    # Thử OCR Vision các trang scan bằng Gemini Vision
+    try:
+        import asyncio
+        import base64
+        from app.gemini_client import generate_content_with_retry
+        from google.genai import types
+
+        reader = PdfReader(path)
+
+        async def ocr_single_page(p_idx: int, img_obj) -> Optional[str]:
+            try:
+                mime = "image/jpeg" if (img_obj.name or "").lower().endswith((".jpg", ".jpeg")) else "image/png"
+                b64 = base64.b64encode(img_obj.data).decode("ascii")
+                parts = [
+                    {"text": "Trích xuất toàn bộ văn bản tiếng Việt có trong trang văn bản quy chuẩn này, giữ nguyên các điều khoản, định mức kỹ thuật:"},
+                    {"inline_data": {"mime_type": mime, "data": b64}},
+                ]
+                cfg = types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=2048,
+                    thinking_config=types.ThinkingConfig(thinking_budget=0),
+                )
+                resp = await generate_content_with_retry(
+                    contents=[{"role": "user", "parts": parts}],
+                    config=cfg,
+                )
+                txt = getattr(resp, "text", "") or ""
+                if txt.strip():
+                    return f"--- TRANG {p_idx + 1} ---\n{txt.strip()}"
+            except Exception as e_p:
+                logger.warning("Lỗi OCR trang %d: %s", p_idx + 1, e_p)
+            return None
+
+        tasks = []
+        max_pages = min(5, len(reader.pages))
+        for p_idx in range(max_pages):
+            page = reader.pages[p_idx]
+            if not page.images:
+                continue
+            best_img = max(page.images, key=lambda i: len(getattr(i, "data", b"") or b""))
+            if getattr(best_img, "data", None) and len(best_img.data) >= 500:
+                tasks.append(ocr_single_page(p_idx, best_img))
+
+        if tasks:
+            page_results = await asyncio.gather(*tasks)
+            ocr_pages = [r for r in page_results if r]
+            if ocr_pages:
+                return _clean_extracted_text("\n\n".join(ocr_pages))
+    except Exception as err:
+        logger.warning("Thử OCR Vision cho PDF scan thất bại: %s", err)
+
+    raise ValueError("PDF không có lớp văn bản (bản scan). Hệ thống đã thử OCR tự động nhưng không thành công. Hãy tải lên bản PDF có lớp text hoặc file Word (.docx, .doc).")
+
+
 def sanitize_text(text: str) -> str:
     """Strip control bytes & null terminators, matching the JS regex sanitation."""
     text = (text or "").replace("\u0000", "")
@@ -318,6 +382,12 @@ def detect_document_metadata(original_filename: str, text: str) -> Dict[str, str
                 if len(cand) >= 15:
                     doc_title = cand[:500]
                     break
+
+    if doc_title and re.match(r"(?i)^về\s+", doc_title):
+        if doc_type == "QCVN":
+            doc_title = f"Quy chuẩn kỹ thuật Quốc gia {doc_title.lower()}"
+        elif doc_type == "TCVN":
+            doc_title = f"Tiêu chuẩn Quốc gia {doc_title.lower()}"
 
     if not doc_title:
         doc_title = clean_stem[:500]

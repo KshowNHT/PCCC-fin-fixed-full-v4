@@ -1,6 +1,7 @@
 """Documents Management and Legal Search Router."""
 import logging
 from pathlib import Path
+import re
 from typing import List, Optional
 from urllib.parse import quote
 
@@ -19,7 +20,7 @@ from app.config import (
 )
 from app.db import get_db
 from app.db_models import Document, User
-from app.doc_extract import extract_docx, extract_pdf, extract_txt, sanitize_text
+from app.doc_extract import detect_document_metadata, extract_doc, extract_docx, extract_pdf, extract_txt, sanitize_text
 from app.hardening import resolve_stored_file, validate_upload
 from app.pdf_report import generate_document_pdf
 from app.utils_file import (
@@ -54,24 +55,45 @@ async def search_documents(
         return []
 
     pattern = f"%{clean_q}%"
-    filters = or_(
+    like_parts = [p for p in re.split(r"[\s_\-:/]+", clean_q) if p]
+    delim_pattern = f"%{'%'.join(like_parts)}%" if like_parts else pattern
+
+    conditions = [
         Document.code.ilike(pattern),
         Document.title.ilike(pattern),
         Document.content.ilike(pattern),
-    )
+        Document.code.ilike(delim_pattern),
+        Document.title.ilike(delim_pattern),
+    ]
+    if len(like_parts) > 1:
+        conditions.append(and_(*[
+            or_(Document.code.ilike(f"%{p}%"), Document.title.ilike(f"%{p}%"), Document.content.ilike(f"%{p}%"))
+            for p in like_parts
+        ]))
+
+    filters = or_(*conditions)
     if type and type.strip():
         filters = and_(filters, Document.type == type.strip())
 
-    stmt = select(Document).where(filters).limit(limit * 2)
+    stmt = select(Document).where(filters).limit(limit * 3)
     result = await db.execute(stmt)
     docs = result.scalars().all()
 
     lower_q = clean_q.lower()
+    norm_q = re.sub(r"[\s_\-:/]+", " ", lower_q).strip()
+
     scored_results = []
     for doc in docs:
-        code_match = lower_q in (doc.code or "").lower()
-        title_match = lower_q in (doc.title or "").lower()
-        content_match = lower_q in (doc.content or "").lower()
+        d_code = (doc.code or "").lower()
+        d_title = (doc.title or "").lower()
+        d_content = (doc.content or "").lower()
+
+        norm_code = re.sub(r"[\s_\-:/]+", " ", d_code).strip()
+        norm_title = re.sub(r"[\s_\-:/]+", " ", d_title).strip()
+
+        code_match = (lower_q in d_code) or (bool(norm_q) and norm_q in norm_code)
+        title_match = (lower_q in d_title) or (bool(norm_q) and norm_q in norm_title)
+        content_match = (lower_q in d_content) or any(p in d_content for p in like_parts if len(p) >= 3)
 
         if code_match and title_match:
             score = 100
@@ -88,6 +110,9 @@ async def search_documents(
         else:
             score = 10
             match_type = "other"
+
+        if doc.is_custom:
+            score += 15
 
         snippet = _extract_snippet(doc.content or "", clean_q)
         scored_results.append({
@@ -138,6 +163,8 @@ async def upload_documents(
                 extracted = await run_in_threadpool(extract_txt, str(dest_path))
             elif ext == ".docx":
                 extracted = await run_in_threadpool(extract_docx, str(dest_path))
+            elif ext == ".doc":
+                extracted = await run_in_threadpool(extract_doc, str(dest_path))
             else:
                 extracted = await run_in_threadpool(extract_pdf, str(dest_path), original_name)
             safe_text = sanitize_text(extracted)
@@ -146,12 +173,18 @@ async def upload_documents(
             if len(safe_text) > 2_000_000:
                 raise HTTPException(status_code=413, detail="Nội dung trích xuất quá lớn.")
             base = sanitize_text(Path(original_name.replace("\\", "/")).stem)[:255]
+            auto_meta = detect_document_metadata(original_name, safe_text)
             doc_code = (code or "").strip() if len(file) == 1 else ""
             doc_title = (title or "").strip() if len(file) == 1 else ""
+            doc_type = (type or "").strip() if type and type.strip() and type != "Khác" else auto_meta["type"]
+
+            final_code = (doc_code or auto_meta["code"] or base.upper() or "VANBAN")[:255]
+            final_title = (doc_title or auto_meta["title"] or base.replace("_", " ") or "Tài liệu")[:500]
+
             new_doc = Document(
-                code=(doc_code or base.upper() or "VANBAN")[:255],
-                title=(doc_title or base.replace("_", " ") or "Tài liệu")[:500],
-                type=type or "Khác",
+                code=final_code,
+                title=final_title,
+                type=doc_type or "Khác",
                 link=f"/data/legal_db/{stored_name}",
                 content=safe_text,
                 is_custom=True,

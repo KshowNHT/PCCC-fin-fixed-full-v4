@@ -36,7 +36,11 @@ async def _ping_gemini_api() -> dict:
             "detail": "Chưa cấu hình GEMINI_API_KEY trên máy chủ.",
         }
     try:
-        config = types.GenerateContentConfig(temperature=0.0, max_output_tokens=10)
+        config = types.GenerateContentConfig(
+            temperature=0.0,
+            max_output_tokens=10,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+        )
         async with asyncio.timeout(10):
             await generate_content_with_retry(contents=[{"role": "user", "parts": [{"text": "ping"}]}], config=config)
         return {

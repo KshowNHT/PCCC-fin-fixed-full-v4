@@ -82,6 +82,7 @@ compose.override.yaml
 # Local runtime/generated application data
 backend/data/uploads/
 backend/data/drawings/
+backend/data/legal_db/
 
 # Generated fonts downloaded at runtime
 backend/data/Roboto-Regular.ttf
@@ -144,7 +145,17 @@ start-dev.bat
 AGENTS.md
 skills-lock.json
 
-# Tài liệu kế hoạch & Playwright test cục bộ theo yêu cầu
+# Kịch bản kiểm thử, tài liệu UAT & audit scripts tạm thời
+audit_full_79_results.json
+b_k_ch_b_n_ki_m_th_*.md
+build_execution_report_doc.py
+build_testcase_doc.py
+run_79_audit.py
+testcase_data.py
+backend/tests/test_def_improvements.py
+backend/tests/test_rag_pipeline.py
+Bao_Cao_Ket_Qua_*.docx
+
 Ke_hoach_Rut_Gon_14_Ngay_PCCC.docx
 docs/Ke_hoach_Rut_Gon_14_Ngay_PCCC.docx
 Tai_Lieu_Test_Case_*.docx

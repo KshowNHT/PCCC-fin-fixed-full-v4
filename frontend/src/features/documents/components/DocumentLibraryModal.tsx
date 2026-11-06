@@ -29,6 +29,7 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
 }) => {
   const isAdmin = isAdminProp !== undefined ? isAdminProp : (userRole ? userRole === "admin" : false);
   const [search, setSearch] = useState("");
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [searchResults, setSearchResults] = useState<any[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
@@ -61,7 +62,7 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
       }
     }, 250);
     return () => clearTimeout(timer);
-  }, [search]);
+  }, [search, documents, refreshTrigger]);
 
   // Nạp PDF blob stream hiển thị trực tiếp trong iframe (Ngày 3 kế hoạch)
   useEffect(() => {
@@ -98,18 +99,26 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
 
   if (!isOpen) return null;
 
-  const displayList = searchResults !== null ? searchResults : documents.filter(
-    (d) =>
-      !search ||
-      d.code.toLowerCase().includes(search.toLowerCase()) ||
-      d.title.toLowerCase().includes(search.toLowerCase()) ||
-      (d.content && d.content.toLowerCase().includes(search.toLowerCase()))
-  );
+  const normalizeText = (s: string) => s.toLowerCase().replace(/[\s_\-:/]+/g, " ").trim();
+  const normSearch = normalizeText(search);
+
+  const displayList = searchResults !== null ? searchResults : documents.filter((d) => {
+    if (!normSearch) return true;
+    const normCode = normalizeText(d.code);
+    const normTitle = normalizeText(d.title);
+    const normContent = d.content ? normalizeText(d.content) : "";
+    return normCode.includes(normSearch) || normTitle.includes(normSearch) || normContent.includes(normSearch);
+  });
 
   const handleUploadWrapper = async (files: File[], code: string, title: string, type: string) => {
     setIsUploading(true);
     try {
-      return await onUploadDocument(files, code, title, type);
+      const res = await onUploadDocument(files, code, title, type);
+      if (res && res.length > 0) {
+        setSearchResults((prev) => (prev ? [...res, ...prev.filter((p) => !res.some((r) => r.id === p.id))] : null));
+      }
+      setRefreshTrigger((k) => k + 1);
+      return res;
     } finally {
       setIsUploading(false);
     }

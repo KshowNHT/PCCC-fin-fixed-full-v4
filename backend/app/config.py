@@ -91,7 +91,7 @@ ALLOWED_ORIGINS = [
 # Whitelist nghiêm ngặt phần mở rộng file được phép upload làm tài liệu pháp
 # lý — chặn .html/.js/.exe/... giả dạng để tránh lưu trữ nội dung có thể bị
 # trình duyệt thực thi (stored XSS) nếu URL từng bị lộ ra ngoài.
-ALLOWED_DOCUMENT_EXTENSIONS = {".txt", ".docx", ".pdf"}
+ALLOWED_DOCUMENT_EXTENSIONS = {".txt", ".docx", ".doc", ".pdf"}
 ALLOWED_DRAWING_EXTENSIONS = {".pdf", ".png", ".jpg", ".jpeg", ".webp"}
 MAX_UPLOAD_SIZE_MB = int(os.environ.get("MAX_UPLOAD_SIZE_MB", "25"))
 MAX_UPLOAD_SIZE_BYTES = MAX_UPLOAD_SIZE_MB * 1024 * 1024

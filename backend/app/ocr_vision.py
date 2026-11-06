@@ -110,6 +110,8 @@ async def _call_vision_model(images: List[bytes]) -> Dict[str, Any]:
 
     config = types.GenerateContentConfig(
         temperature=0.1,
+        max_output_tokens=2048,
+        thinking_config=types.ThinkingConfig(thinking_budget=0),
         response_mime_type="application/json",
         response_schema=ExtractedProjectInfo,
     )

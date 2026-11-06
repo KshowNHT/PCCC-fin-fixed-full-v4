@@ -46,6 +46,11 @@ def validate_upload(content: bytes, extension: str) -> None:
             raise
         except (zipfile.BadZipFile, ValueError):
             reject("File DOCX bị hỏng.")
+    elif extension == ".doc":
+        if not content.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"):
+            reject("File không phải tài liệu Word .doc (OLE2).")
+        if len(content) < 512:
+            reject("File .doc quá ngắn hoặc bị rỗng.")
     else:
         from PIL import Image
         expected = {".png": "PNG", ".jpg": "JPEG", ".jpeg": "JPEG", ".webp": "WEBP"}

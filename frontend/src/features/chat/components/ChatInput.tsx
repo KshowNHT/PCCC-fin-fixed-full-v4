@@ -47,6 +47,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     e.target.style.height = `${Math.min(e.target.scrollHeight, 160)}px`;
   };
 
+  const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const pastedText = e.clipboardData.getData("text");
+    if (!pastedText) return;
+
+    // Lấy vị trí con trỏ hiện tại và ghép chuỗi để cập nhật state ngay lập tức (DEF-02)
+    const target = e.currentTarget;
+    const start = target.selectionStart || 0;
+    const end = target.selectionEnd || 0;
+    const currentValue = target.value;
+    const nextValue = currentValue.substring(0, start) + pastedText + currentValue.substring(end);
+
+    e.preventDefault();
+    setText(nextValue);
+
+    // Cập nhật vị trí con trỏ và tự động co giãn chiều cao khung chat ngay khi paste
+    requestAnimationFrame(() => {
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = textareaRef.current.selectionEnd = start + pastedText.length;
+        textareaRef.current.style.height = "auto";
+        textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 160)}px`;
+      }
+    });
+  };
+
   return (
     <div className="w-full max-w-4xl mx-auto px-4 pb-4 pt-1">
       <form
@@ -70,6 +94,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             value={text}
             onChange={handleInput}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder="Hỏi về quy chuẩn PCCC, quy mô công trình, hoặc yêu cầu thẩm duyệt..."
             className="flex-1 max-h-40 py-1.5 px-2 bg-transparent text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 text-sm outline-none resize-none font-sans leading-relaxed custom-scrollbar"
           />

@@ -1,5 +1,5 @@
 import React, { useState, useRef } from "react";
-import { Upload, Loader2, CheckCircle2, AlertCircle, FileText } from "lucide-react";
+import { Upload, Loader2, CheckCircle2, AlertCircle, FileText, Info } from "lucide-react";
 import { DocumentItem } from "../../../types";
 
 interface DocumentUploadFormProps {
@@ -49,7 +49,23 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({ onUpload
     <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
       <div className="flex items-center justify-between">
         <p className="text-xs font-bold text-slate-800">Tải lên văn bản pháp quy mới (RAG Knowledge)</p>
-        <span className="text-[11px] text-slate-400">Hỗ trợ: PDF có lớp chữ, Word (.docx), .txt</span>
+        <span className="text-[11px] text-slate-400">Hỗ trợ: PDF có lớp chữ, Word (.docx, .doc), .txt</span>
+      </div>
+
+      <div className="p-3 bg-amber-50/90 border border-amber-200/90 rounded-xl text-xs space-y-1.5 text-amber-950">
+        <div className="flex items-center gap-1.5 font-bold text-amber-900">
+          <Info className="w-4 h-4 shrink-0 text-amber-600" />
+          <span>Hướng dẫn chuẩn bị tài liệu &amp; Chất lượng trích xuất (DEF-03)</span>
+        </div>
+        <p className="text-[11px] leading-relaxed text-amber-900/90">
+          • <strong>Quy chuẩn cốt lõi:</strong> Toàn bộ quy chuẩn và văn bản pháp luật nền tảng (QCVN 06:2022, TCVN, NĐ 105/2025/NĐ-CP...) đã được hệ thống mã hóa sẵn và tra cứu RAG chuẩn xác.
+        </p>
+        <p className="text-[11px] leading-relaxed text-amber-900/90">
+          • <strong>Văn bản ngoài:</strong> Khuyến nghị ưu tiên nạp file <strong>PDF có sẵn lớp text (text layer)</strong> hoặc file Word (.docx, .doc) để thuật toán RAG bóc tách chính xác từng điều khoản.
+        </p>
+        <p className="text-[11px] leading-relaxed text-amber-900/90">
+          • <strong>Bản vẽ kỹ thuật scan:</strong> Đối với bản vẽ thiết kế dạng scan, vui lòng sử dụng tính năng <strong>&quot;Bóc tách bản vẽ (Vision AI)&quot;</strong> tại giao diện chính thay vì nạp vào thư viện RAG này.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -82,7 +98,7 @@ export const DocumentUploadForm: React.FC<DocumentUploadFormProps> = ({ onUpload
         ref={inputRef}
         type="file"
         multiple
-        accept=".pdf,.docx,.txt"
+        accept=".pdf,.docx,.doc,.txt"
         className="hidden"
         onClick={(e) => { (e.target as HTMLInputElement).value = ""; }}
         onChange={handleSelectFiles}

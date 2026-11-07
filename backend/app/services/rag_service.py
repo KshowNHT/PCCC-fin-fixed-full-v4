@@ -31,17 +31,55 @@ async def search_citations_for_project_and_query(
     target_codes.append("NĐ105/2025/NĐ-CP")
     target_codes.append("QCVN 06:2022/BXD (Sửa đổi 01-2023)")
 
-    # 2. Đặc thù công năng
-    if "karaoke" in p_type or "vũ trường" in p_type or "karaoke" in q_lower or "karaoke" in stripped_q:
+    # 2. Đặc thù công năng (bao phủ toàn bộ 14 nhóm loại hình công trình theo NĐ 105/2025 & QCVN 06:2022)
+    combined_ctx = f"{p_type} {q_lower}"
+    combined_stripped = f"{strip_vietnamese_accents(p_type)} {stripped_q}"
+
+    if any(k in combined_ctx or k in combined_stripped for k in ["karaoke", "vu truong", "vũ trường", "bar", "club"]):
         target_codes.append("147/2020/TT-BCA")
-    if "xăng dầu" in p_type or "xang dau" in stripped_q or "xăng dầu" in q_lower:
+        target_codes.append("QCVN 10:2025/BCA")
+    if any(k in combined_ctx or k in combined_stripped for k in ["xang dau", "xăng dầu", "khi dot", "khí đốt", "lpg", "tram bien ap", "trạm biến áp"]):
         target_codes.append("QCVN 01:2020/BCT")
-    if any(k in p_type or k in stripped_q for k in ["gara", "xe o to", "bai do xe", "xe ô tô", "bãi đỗ xe"]):
+        target_codes.append("TCVN 9385:2012")
+    if any(k in combined_ctx or k in combined_stripped for k in ["gara", "xe o to", "bai do xe", "nha de xe", "xe ô tô", "bãi đỗ xe", "nhà để xe"]):
         target_codes.append("QCVN 13:2018/BXD")
-    if any(k in p_type or k in stripped_q for k in ["cho", "trung tam thuong mai", "sieu thi", "chợ", "trung tâm thương mại", "siêu thị"]):
+        target_codes.append("TCVN 5687:2024")
+        target_codes.append("TCVN 7336:2021")
+    if any(k in combined_ctx or k in combined_stripped for k in ["cho", "trung tam thuong mai", "sieu thi", "cua hang", "nha hang", "chợ", "trung tâm thương mại", "siêu thị", "cửa hàng", "nhà hàng"]):
         target_codes.append("TCVN 6161:1996")
-    if "kho" in p_type or "gia do" in stripped_q or "kho" in stripped_q or "giá đỡ" in q_lower:
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 7336:2021")
+    if any(k in combined_ctx or k in combined_stripped for k in ["kho", "gia do", "ke cao", "giá đỡ", "kệ cao"]):
         target_codes.append("TCVN 14496:2025")
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 7336:2021")
+    if any(k in combined_ctx or k in combined_stripped for k in ["nha may", "nha xuong", "san xuat", "xi nghiep", "khu cong nghiep", "nhà máy", "nhà xưởng", "sản xuất"]):
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 2622:1995")
+        target_codes.append("TCVN 7336:2021")
+        target_codes.append("TCVN 9385:2012")
+    if any(k in combined_ctx or k in combined_stripped for k in ["truong hoc", "giao duc", "mam non", "nha tre", "tieu hoc", "trung hoc", "dai hoc", "cao dang", "trường học", "giáo dục", "mầm non"]):
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 2622:1995")
+        target_codes.append("TCVN 13456:2022")
+    if any(k in combined_ctx or k in combined_stripped for k in ["benh vien", "y te", "phong kham", "dieu duong", "bệnh viện", "y tế", "phòng khám"]):
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 7336:2021")
+        target_codes.append("TCVN 5687:2024")
+    if any(k in combined_ctx or k in combined_stripped for k in ["rap hat", "hoi truong", "su kien", "rap chieu phim", "nha van hoa", "san van dong", "nha thi dau", "rạp hát", "hội trường", "sự kiện"]):
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 2622:1995")
+        target_codes.append("TCVN 5687:2024")
+        target_codes.append("TCVN 7336:2021")
+    if any(k in combined_ctx or k in combined_stripped for k in ["nha hon hop", "hon hop", "chung cu", "khach san", "van phong", "nha nghi", "nha tro", "ky tuc xa", "tru so", "cong so", "nhà hỗn hợp", "chung cư", "khách sạn", "văn phòng"]):
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 7336:2021")
+        target_codes.append("TCVN 7568-14:2025")
+        target_codes.append("TCVN 5687:2024")
+    if any(k in combined_ctx or k in combined_stripped for k in ["nha o rieng le", "ket hop kinh doanh", "shophouse", "nha pho", "biet thu", "nha dan", "nhà ở riêng lẻ", "kết hợp kinh doanh"]):
+        target_codes.append("QCVN 10:2025/BCA")
+        target_codes.append("TCVN 2622:1995")
+        target_codes.append("TCVN 13456:2022")
 
     # 3. Đặc thù thiết bị & hệ thống kỹ thuật
     if any(k in stripped_q for k in ["bom", "tram bom", "may bom"]):

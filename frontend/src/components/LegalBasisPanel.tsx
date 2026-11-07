@@ -8,7 +8,23 @@ const FIELD_LABELS: Record<string, string> = {
   floors: "số tầng nổi",
   totalFloorArea: "tổng diện tích sàn",
   height: "chiều cao PCCC",
+  volume: "khối tích công trình",
   type: "loại công trình / công năng",
+  industrialSubtype: "phân loại sản xuất công nghiệp khác hay chuyên ngành",
+  hazardClass: "hạng nguy hiểm cháy/nổ (A, B, C, D, E)",
+  mixedUseParts: "tỷ lệ diện tích sàn kinh doanh và công năng các phần của nhà ở kết hợp kinh doanh / nhà hỗn hợp",
+  industrialSpecialRule: "quy định áp dụng cho loại công nghiệp chuyên ngành đã khai báo",
+  warehouseScope: "phạm vi quy định áp dụng cho kho hạng D/E",
+  privateHouseScope: "xác nhận nhà ở riêng lẻ thuần túy hay có chuyển đổi công năng sản xuất, kinh doanh",
+  schoolScope: "cấp học, số nhóm trẻ/học sinh hoặc khối tích khối nhà học theo mục 2 Phụ lục III",
+  assemblyScope: "sức chứa số chỗ ngồi khán phòng (từ 300 chỗ) hoặc quy mô theo mục 4 Phụ lục III",
+  garageScope: "xác nhận nhà để xe ô tô dạng kín hay hở theo mục 12 Phụ lục III",
+  medicalScope: "loại hình cơ sở khám chữa bệnh, số giường nội trú hoặc quy mô theo mục 3 Phụ lục III",
+  fuelScope: "cấp cửa hàng xăng dầu, trạm cấp khí đốt LPG hoặc công suất theo Phụ lục III",
+  entertainmentScope: "loại hình dịch vụ giải trí (karaoke, vũ trường hay quán bar/pub) theo mục 5 Phụ lục III",
+  marketScope: "phân hạng chợ, siêu thị hoặc trung tâm thương mại theo mục 6 Phụ lục III",
+  unclassifiedType: "xác nhận nhóm công năng tương ứng trong Phụ lục III Nghị định 347/2026/NĐ-CP",
+  componentsComplete: "xác nhận danh sách hạng mục công trình đầy đủ",
 };
 
 export function resolveStatus(basis: AppraisalBasis | null | undefined, isSubject: boolean): AppraisalStatus {

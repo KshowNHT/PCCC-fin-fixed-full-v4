@@ -77,14 +77,14 @@ def _evaluate_technical_item(
         or est_area >= 3000
         or volume >= 5000
         or category == "karaoke_entertainment"
-        or (category in ("market_mall", "office_hotel", "warehouse", "factory", "garage") and (est_area >= 1000 or volume >= 3000))
+        or (category in ("market_mall", "office_hotel", "warehouse", "factory", "garage", "hospital_medical", "fuel_energy", "school", "assembly") and (est_area >= 1000 or volume >= 3000))
     )
     req_indoor_hydrant = (
         volume >= 5000
         or eff_h > 12
         or floors >= 5
         or category == "karaoke_entertainment"
-        or (category in ("warehouse", "factory", "market_mall", "garage") and (volume >= 2500 or est_area >= 1000))
+        or (category in ("warehouse", "factory", "market_mall", "garage", "hospital_medical", "fuel_energy", "assembly") and (volume >= 2500 or est_area >= 1000))
     )
     req_sprinkler = (
         eff_h >= 25
@@ -92,7 +92,7 @@ def _evaluate_technical_item(
         or volume >= 15000
         or category == "karaoke_entertainment"
         or (basements >= 1 and est_area >= 1000)
-        or (category in ("warehouse", "factory", "market_mall", "garage") and (est_area >= 2000 or volume >= 10000))
+        or (category in ("warehouse", "factory", "market_mall", "garage", "hospital_medical", "fuel_energy", "assembly") and (est_area >= 2000 or volume >= 10000))
     )
 
     floors_label = f"{floors} tầng" if floors > 0 else "chưa khai báo số tầng"
@@ -198,7 +198,7 @@ def _evaluate_technical_item(
 
     elif stt == 8:
         min_bins = max(max(floors, 1) * 2, int(round(est_area / 75)) if est_area > 0 else 2)
-        if volume >= 5000 or floors >= 7 or category in ("karaoke_entertainment", "warehouse", "factory"):
+        if volume >= 5000 or floors >= 7 or category in ("karaoke_entertainment", "warehouse", "factory", "fuel_energy", "hospital_medical"):
             result = "Khuyến nghị mạnh"
             note = (
                 f"Khối tích {fmt_number(volume)} m³ ({floors_label}, {fmt_number(est_area)} m² sàn) yêu cầu trang bị tối thiểu "
@@ -311,7 +311,7 @@ def _evaluate_technical_item(
             or floors >= 5
             or est_area >= 1500
             or volume >= 5000
-            or category in ("karaoke_entertainment", "warehouse", "factory", "market_mall", "office_hotel", "garage")
+            or category in ("karaoke_entertainment", "warehouse", "factory", "market_mall", "office_hotel", "garage", "hospital_medical", "fuel_energy", "school", "assembly")
         ):
             result = "Khuyến nghị mạnh"
             note = "Cơ sở có nguy hiểm về cháy, nổ thuộc danh mục phải mua bảo hiểm cháy, nổ bắt buộc đối với tài sản khi đưa vào vận hành."

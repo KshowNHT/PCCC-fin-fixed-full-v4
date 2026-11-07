@@ -73,10 +73,12 @@ CATEGORY_INFO = {
     "warehouse": {"label": "Nhà kho / kho chứa hàng"},
     "market_mall": {"label": "Chợ / trung tâm thương mại / siêu thị"},
     "school": {"label": "Trường học / cơ sở giáo dục"},
+    "hospital_medical": {"label": "Bệnh viện / cơ sở y tế"},
     "office_hotel": {"label": "Văn phòng / công sở / khách sạn"},
     "garage": {"label": "Gara ô tô / bãi đỗ xe"},
     "factory": {"label": "Nhà máy / nhà xưởng"},
     "assembly": {"label": "Rạp hát / hội trường / sự kiện"},
+    "fuel_energy": {"label": "Cửa hàng xăng dầu / trạm khí đốt / năng lượng"},
     "unclassified": {"label": "Chưa xác định nhóm công năng"},
 }
 
@@ -91,21 +93,37 @@ THRESHOLD_LABELS = {
 # được phân loại có chủ đích, không rơi vào "chưa xác định".
 _EXACT_TYPE_MAP = {
     "nhà ở riêng lẻ kết hợp kinh doanh": "mixed_residential",
+    "nhà hỗn hợp": "mixed_residential",
+    "nhà chung cư": "mixed_residential",
+    "nhà chung cư, tập thể": "mixed_residential",
     "nhà ở riêng lẻ": "private_house",
     "cơ sở kinh doanh karaoke, vũ trường": "karaoke_entertainment",
+    "quán karaoke": "karaoke_entertainment",
     "gara ô tô": "garage",
+    "gara ô tô kín": "garage",
+    "nhà để xe ô tô dạng kín": "garage",
     "văn phòng, khách sạn công cộng": "office_hotel",
+    "văn phòng": "office_hotel",
+    "khách sạn": "office_hotel",
     "nhà kho xếp giá đỡ kệ cao": "warehouse",
+    "nhà kho": "warehouse",
     "chợ, trung tâm thương mại": "market_mall",
+    "trung tâm thương mại": "market_mall",
+    "siêu thị": "market_mall",
     "nhà máy, nhà xưởng sản xuất": "factory",
+    "nhà máy / nhà xưởng": "factory",
     "cơ sở giáo dục, trường học": "school",
+    "bệnh viện, cơ sở y tế": "hospital_medical",
     "rạp hát, hội trường, trung tâm tổ chức sự kiện": "assembly",
+    "cửa hàng xăng dầu": "fuel_energy",
 }
 
 # Thứ tự có ý nghĩa: nhóm nguy cơ cao kiểm tra trước. Dùng regex (\b) để tránh
 # khớp nhầm chuỗi con (vd "kho" trong "khoảng", "chợ" trong từ khác).
 _KEYWORD_PATTERNS: List[Tuple[str, Tuple[str, ...]]] = [
     ("karaoke_entertainment", (r"karaoke", r"vũ trường", r"vu truong", r"quán bar", r"\bbar\b", r"\bpub\b", r"\bdisco(theque)?\b")),
+    ("fuel_energy", (r"xăng dầu", r"cây xăng", r"khí đốt", r"\blpg\b", r"\bcng\b", r"trạm biến áp", r"nhà máy điện")),
+    ("hospital_medical", (r"bệnh viện", r"y tế", r"phòng khám", r"nhà hộ sinh", r"điều dưỡng", r"hospital", r"clinic")),
     ("school", (r"trường học", r"mầm non", r"tiểu học", r"trung học", r"\bschool\b", r"nhà trẻ", r"cơ sở giáo dục", r"đại học", r"cao đẳng")),
     ("assembly", (r"rạp hát", r"rạp chiếu", r"hội trường", r"sự kiện", r"nhà hát", r"cinema")),
     ("market_mall", (r"\bchợ\b", r"trung tâm thương mại", r"siêu thị", r"\bttmm\b", r"\bmarket\b", r"shopping", r"\bmall\b")),
@@ -113,7 +131,7 @@ _KEYWORD_PATTERNS: List[Tuple[str, Tuple[str, ...]]] = [
     ("factory", (r"nhà máy", r"nhà xưởng", r"xưởng sản xuất", r"factory", r"xí nghiệp")),
     ("garage", (r"\bgara\b", r"\bga ra\b", r"garage", r"bãi đỗ xe", r"nhà để xe")),
     ("office_hotel", (r"văn phòng", r"công sở", r"khách sạn", r"nhà nghỉ", r"\bhotel\b", r"\bmotel\b", r"nhà khách")),
-    ("mixed_residential", (r"nhà hỗn hợp", r"kết hợp kinh doanh", r"chung cư", r"nhà phố", r"shophouse")),
+    ("mixed_residential", (r"nhà hỗn hợp", r"kết hợp kinh doanh", r"chung cư", r"nhà tập thể", r"nhà phố", r"shophouse")),
     ("private_house", (r"nhà ở riêng lẻ", r"nhà ở dân dụng", r"nhà dân", r"biệt thự", r"nhà ở")),
 ]
 
@@ -280,7 +298,7 @@ def build_appraisal_basis(project: Dict[str, Any]) -> Dict[str, Any]:
         limits, clause = (("floors", ">=", 4), ("totalFloorArea", ">=", 1000)), "mục 5"
     elif category == "mixed_residential" and ptype in {"nhà hỗn hợp", "công trình hỗn hợp", "công trình đa năng"}:
         limits, clause = GENERAL_THRESHOLDS, "mục 8"
-    elif category == "mixed_residential" and ptype in {"nhà chung cư", "chung cư", "nhà tập thể", "nhà ở tập thể"}:
+    elif category == "mixed_residential" and ptype in {"nhà chung cư", "chung cư", "nhà tập thể", "nhà ở tập thể", "nhà chung cư, tập thể"}:
         limits, clause = GENERAL_THRESHOLDS, "mục 1"
     elif category == "office_hotel":
         limits, clause = GENERAL_THRESHOLDS, "mục 7"
@@ -288,19 +306,47 @@ def build_appraisal_basis(project: Dict[str, Any]) -> Dict[str, Any]:
         limits, clause = (("totalFloorArea", ">=", 2000),), "mục 12"
     elif category == "market_mall" and re.search(r"chợ|trung tâm thương mại|siêu thị", ptype):
         limits, clause = (("totalFloorArea", ">=", 2000),), "mục 6"
+    if not clause and not needed:
+        needed = {
+            "mixed_residential": ["mixedUseParts"],
+            "private_house": ["privateHouseScope"],
+            "school": ["schoolScope"],
+            "assembly": ["assemblyScope"],
+            "garage": ["garageScope"],
+            "hospital_medical": ["medicalScope"],
+            "fuel_energy": ["fuelScope"],
+            "karaoke_entertainment": ["entertainmentScope"],
+            "market_mall": ["marketScope"],
+        }.get(category, ["unclassifiedType"] if ptype else ["type"])
     values = {k: to_number(project.get(k)) for k in ("floors", "totalFloorArea", "volume")}
     values["height"] = effective_height(project)
     thresholds = _build_threshold_rows({"thresholds": limits}, values)
     met = [row for row in thresholds if row["state"] == "met"]
     missing = [row["key"] for row in thresholds if row["state"] == "missing"]
     source = "statutory" if clause else "manual_review"
-    display_missing = {"industrialSubtype": "phân loại sản xuất công nghiệp khác hay chuyên ngành", "hazardClass": "hạng nguy hiểm cháy/nổ", "mixedUseParts": "quy mô và công năng các phần của nhà hỗn hợp", "industrialSpecialRule": "quy định áp dụng cho loại công nghiệp chuyên ngành đã khai báo", "warehouseScope": "phạm vi quy định áp dụng cho kho hạng D/E"}
+    display_missing = {
+        "type": "loại công trình / công năng",
+        "industrialSubtype": "phân loại sản xuất công nghiệp khác hay chuyên ngành",
+        "hazardClass": "hạng nguy hiểm cháy/nổ",
+        "mixedUseParts": "tỷ lệ diện tích sàn kinh doanh và công năng các phần của nhà ở kết hợp kinh doanh / nhà hỗn hợp",
+        "industrialSpecialRule": "quy định áp dụng cho loại công nghiệp chuyên ngành đã khai báo",
+        "warehouseScope": "phạm vi quy định áp dụng cho kho hạng D/E",
+        "privateHouseScope": "xác nhận nhà ở riêng lẻ thuần túy hay có chuyển đổi công năng sản xuất, kinh doanh",
+        "schoolScope": "cấp học, số nhóm trẻ/học sinh hoặc khối tích khối nhà học theo mục 2 Phụ lục III",
+        "assemblyScope": "sức chứa số chỗ ngồi khán phòng (từ 300 chỗ) hoặc quy mô theo mục 4 Phụ lục III",
+        "garageScope": "xác nhận nhà để xe ô tô dạng kín hay hở theo mục 12 Phụ lục III",
+        "medicalScope": "loại hình cơ sở khám chữa bệnh, số giường nội trú hoặc quy mô theo mục 3 Phụ lục III",
+        "fuelScope": "cấp cửa hàng xăng dầu, trạm cấp khí đốt LPG hoặc công suất theo Phụ lục III",
+        "entertainmentScope": "loại hình dịch vụ giải trí (karaoke, vũ trường hay quán bar/pub) theo mục 5 Phụ lục III",
+        "marketScope": "phân hạng chợ, siêu thị hoặc trung tâm thương mại theo mục 6 Phụ lục III",
+        "unclassifiedType": "xác nhận nhóm công năng tương ứng trong Phụ lục III Nghị định 347/2026/NĐ-CP",
+    }
     legal = (f"Sàng lọc quy mô theo {clause}, Phụ lục III kèm Nghị định 347/2026/NĐ-CP thay thế Phụ lục III của Nghị định 105/2025/NĐ-CP, hiệu lực 15/9/2026. "
              "Phải xác nhận loại dự án, giai đoạn, điều kiện áp dụng và thẩm quyền theo Điều 6, Điều 9 đã sửa đổi; không phải chứng nhận tuân thủ.") if clause else "Chưa áp dụng ngưỡng pháp định cho phân loại này; không dùng ngưỡng nhà hỗn hợp để thay thế."
     if not clause:
         status = STATUS_INSUFFICIENT
         missing = needed or ["type"]
-        summary = f"Không tìm thấy quy định phù hợp đã xác minh và đủ điều kiện áp dụng cho nhóm {label}. Cần bổ sung hoặc xác nhận: {', '.join(display_missing.get(k, k) for k in missing)}; rà soát thủ công, chưa kết luận thuộc hoặc không thuộc diện thẩm định."
+        summary = f"Không tìm thấy quy định phù hợp đã xác minh và đủ điều kiện áp dụng cho nhóm {label}. Cần bổ sung hoặc xác nhận: {', '.join(display_missing.get(k, _MISSING_LABELS.get(k, k)) for k in missing)}; rà soát thủ công, chưa kết luận thuộc hoặc không thuộc diện thẩm định."
     else:
         status = STATUS_REQUIRED if met else STATUS_INSUFFICIENT if missing else STATUS_NOT_REQUIRED
         if category == "mixed_residential" and clause == "mục 8" and not met:

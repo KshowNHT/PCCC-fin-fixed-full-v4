@@ -53,10 +53,28 @@ export function useProjectSpecsForm({
 
   const handleCommitField = useCallback(
     (field: keyof ProjectInfo, value: unknown) => {
+      if (field === "floorArea" || field === "totalFloorArea") {
+        const fa = field === "floorArea" ? Number(value) || 0 : Number(localFloorArea) || 0;
+        const tfa = field === "totalFloorArea" ? Number(value) || 0 : Number(localTotalFloorArea) || 0;
+        if (fa === (Number(project.floorArea) || 0) && tfa === (Number(project.totalFloorArea) || 0)) {
+          return;
+        }
+        onDraftChange?.();
+        if (fa > 0 && tfa > 0 && tfa < fa) {
+          return;
+        }
+        onUpdateProject({ floorArea: fa, totalFloorArea: tfa });
+        return;
+      }
+      if (field === "floors" || field === "basements" || field === "pcccHeight" || field === "volume") {
+        if ((Number(project[field]) || 0) === (Number(value) || 0)) return;
+      } else if (String(project[field] ?? "") === String(value ?? "")) {
+        return;
+      }
       onDraftChange?.();
       onUpdateProject({ [field]: value });
     },
-    [onDraftChange, onUpdateProject]
+    [localFloorArea, localTotalFloorArea, onDraftChange, onUpdateProject, project]
   );
 
   const handleFloorFunctionChange = useCallback(

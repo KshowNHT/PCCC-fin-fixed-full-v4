@@ -29,16 +29,29 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
-    await onUpdateProject({
-      name: form.localName, type: form.localType, investor: form.localInvestor, location: form.localLocation,
-      floors: Number(form.localFloors) || 0, basements: Number(form.localBasements) || 0,
-      pcccHeight: Number(form.localPcccHeight) || 0, floorArea: Number(form.localFloorArea) || 0,
-      totalFloorArea: Number(form.localTotalFloorArea) || 0, volume: Number(form.localVolume) || 0,
+    const fa = Number(form.localFloorArea) || 0;
+    const tfa = Number(form.localTotalFloorArea) || 0;
+    const payload: Partial<ProjectInfo> = {
+      name: form.localName,
+      type: form.localType,
+      investor: form.localInvestor,
+      location: form.localLocation,
+      floors: Number(form.localFloors) || 0,
+      basements: Number(form.localBasements) || 0,
+      pcccHeight: Number(form.localPcccHeight) || 0,
+      volume: Number(form.localVolume) || 0,
       fireRating: form.localFireRating,
       commercialDetails: form.localCommDetails,
-    });
-    onTriggerAppraisal();
-    onClose();
+    };
+    if (!project.components?.length) {
+      payload.floorArea = fa;
+      payload.totalFloorArea = tfa;
+    }
+    await onUpdateProject(payload);
+    await onTriggerAppraisal();
+    if (!(fa > 0 && tfa > 0 && tfa < fa && !project.components?.length)) {
+      onClose();
+    }
   };
 
   return (
@@ -72,7 +85,7 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
             <SpecsScaleFields localFloors={form.localFloors} setLocalFloors={form.setLocalFloors} localBasements={form.localBasements} setLocalBasements={form.setLocalBasements} localPcccHeight={form.localPcccHeight} setLocalPcccHeight={form.setLocalPcccHeight} localFloorArea={form.localFloorArea} setLocalFloorArea={form.setLocalFloorArea} localTotalFloorArea={form.localTotalFloorArea} setLocalTotalFloorArea={form.setLocalTotalFloorArea} localVolume={form.localVolume} setLocalVolume={form.setLocalVolume} localFireRating={form.localFireRating} setLocalFireRating={form.setLocalFireRating} localCommDetails={form.localCommDetails} setLocalCommDetails={form.setLocalCommDetails} onCommitField={form.handleCommitField} />
             <FloorFunctionsSubform floorsCount={Number(form.localFloors) || 0} floorFunctions={form.floorFunctions} onChangeFloorFunction={form.handleFloorFunctionChange} />
             <BasementFunctionsSubform basementsCount={Number(form.localBasements) || 0} functions={form.basementFunctions} heights={form.basementHeights} areas={form.basementAreas} footprints={form.basementFootprints} onChangeField={form.handleBasementFieldChange} />
-            <BuildingEditor project={project} onUpdate={onUpdateProject} />
+            <BuildingEditor project={project} onUpdate={onUpdateProject} onVolumeChange={form.setLocalVolume} />
           </div>
 
           <div className="p-4 bg-slate-50 dark:bg-slate-950/70 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">

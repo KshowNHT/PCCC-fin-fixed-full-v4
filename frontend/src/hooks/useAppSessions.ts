@@ -184,6 +184,9 @@ export function useAppSessions(onError: (msg: string) => void) {
           setSessions((prev) => prev.map((s) => (s.id === sid ? data : s)));
         }
         Object.keys(info).forEach((key) => failedFields.current.delete(key));
+        if (saveCount.current === 1) {
+          failedFields.current.clear();
+        }
         if (activeIdRef.current === sid && saveCount.current === 1 && !failedFields.current.size) {
           onError("");
         }

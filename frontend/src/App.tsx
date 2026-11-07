@@ -86,7 +86,7 @@ export default function App() {
   const activeProject = sessionCtrl.activeSession?.projectInfo || EMPTY_PROJECT;
   const effectiveReviewState = sessionCtrl.hasLocalDraft ? "draft" : sessionCtrl.activeSession?.reviewState || "draft";
   const effectiveChecklist = sessionCtrl.hasLocalDraft ? [] : sessionCtrl.activeSession?.checklist || [];
-  const { hasAreaContradiction, warnings } = useProjectWarnings(sessionCtrl.activeSession, activeProject);
+  const { hasAreaContradiction, warnings } = useProjectWarnings(sessionCtrl.activeSession, activeProject, effectiveReviewState);
 
   // Tương thích với bộ test đồng bộ hóa (app_sync_test.tsx)
   (globalThis as Record<string, unknown>).sidebarProps = {
@@ -183,7 +183,7 @@ export default function App() {
         chatContent={<ChatView messages={sessionCtrl.activeSession?.messages || []} isPending={sessionCtrl.isPending} onSendMessage={sessionCtrl.sendMessage} onCancelPending={sessionCtrl.cancelPending} onOpenOcrUpload={() => setIsBlueprintModalOpen(true)} onOpenCitation={handleOpenCitation} />}
         checklistContent={<ComplianceChecklistView checklist={sessionCtrl.hasLocalDraft ? [] : sessionCtrl.activeSession?.checklist || []} />}
         verdictContent={<LegalBasisTabWrapper appraisalBasis={sessionCtrl.hasLocalDraft ? null : sessionCtrl.activeSession?.appraisalBasis} isSubjectToAppraisal={sessionCtrl.activeSession?.isSubjectToAppraisal ?? false} appraisalReason={sessionCtrl.hasLocalDraft ? "Chưa kiểm duyệt các thông số mới." : sessionCtrl.activeSession?.appraisalReason || ""} checklist={sessionCtrl.hasLocalDraft ? [] : sessionCtrl.activeSession?.checklist || []} projectInfo={activeProject} isPending={sessionCtrl.isPending} onTriggerAppraisal={sessionCtrl.triggerAppraisal} />}
-        specsDrawer={<ProjectSpecsDrawer isOpen={isSpecsDrawerOpen} onClose={() => setIsSpecsDrawerOpen(false)} project={activeProject} onUpdateProject={sessionCtrl.updateProject} onTriggerAppraisal={sessionCtrl.triggerAppraisal} onReloadSession={sessionCtrl.reloadActiveSession} isPending={sessionCtrl.isPending} isSaving={sessionCtrl.isSaving} hasLocalDraft={sessionCtrl.hasLocalDraft} />}
+        specsDrawer={<ProjectSpecsDrawer isOpen={isSpecsDrawerOpen} onClose={() => setIsSpecsDrawerOpen(false)} project={activeProject} onUpdateProject={sessionCtrl.updateProject} onDraftChange={sessionCtrl.markDraft} onTriggerAppraisal={sessionCtrl.triggerAppraisal} onReloadSession={sessionCtrl.reloadActiveSession} isPending={sessionCtrl.isPending} isSaving={sessionCtrl.isSaving} hasLocalDraft={sessionCtrl.hasLocalDraft} />}
         mobileBottomNav={<MobileBottomNav activeTab={activeTab} onChangeTab={setActiveTab} checklistCount={sessionCtrl.activeSession?.checklist?.length || 0} />}
         modals={<AppModals isBlueprintOpen={isBlueprintModalOpen} onCloseBlueprint={() => setIsBlueprintModalOpen(false)} sessionId={sessionCtrl.activeSessionId} onApplyOcr={handleApplyOcr} isDocumentsOpen={isDocumentsModalOpen} onCloseDocuments={() => setIsDocumentsModalOpen(false)} documents={docCtrl.documents} onUploadDocument={docCtrl.uploadDocuments} onDeleteDocument={docCtrl.deleteDocument} onResetDocuments={docCtrl.resetDocuments} onDownloadDocument={docCtrl.downloadDocument} isInspectionLogOpen={isInspectionLogOpen} onCloseInspectionLog={() => setIsInspectionLogOpen(false)} isUserManagementOpen={isUserManagementOpen} onCloseUserManagement={() => setIsUserManagementOpen(false)} currentUser={currentUser} onLogout={handleLogout} citationDoc={citationDoc} onCloseCitation={() => setCitationDoc(null)} />}
       />

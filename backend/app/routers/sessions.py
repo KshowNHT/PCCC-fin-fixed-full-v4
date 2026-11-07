@@ -19,6 +19,7 @@ from app.schemas_project import ProjectUpdateRequest
 from app.services.session_service import (
     DEFAULT_PROJECT,
     CreateSessionRequest,
+    _build_appraisal_chat_message,
     _check_revision,
     _clear_review,
     _load_session_full,
@@ -191,7 +192,7 @@ async def update_session_project(
         message = ChatMessage(
             session_id=session.id,
             sender="assistant",
-            text=evaluation["appraisalReason"] + "\n" + "\n".join(evaluation["warnings"]),
+            text=_build_appraisal_chat_message(pinfo, evaluation),
         )
         db.add(message)
         await _log_inspection(

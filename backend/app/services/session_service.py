@@ -5,7 +5,7 @@ import logging
 import re
 import sys
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
 from pydantic import BaseModel, Field, ValidationError
@@ -163,6 +163,100 @@ def _apply_ai_outputs(session: "ChatSession", parsed: dict, grounding_text: Opti
 
 def _merge_checklist(ai_checklist: Optional[List[dict]], deterministic_checklist: List[dict]) -> List[dict]:
     return [dict(item) for item in deterministic_checklist]
+
+
+def _build_appraisal_chat_message(pinfo: Dict[str, Any], evaluation: Dict[str, Any]) -> str:
+    """Tạo nội dung phản hồi chi tiết, không lặp chữ cho phiên chat khi bấm 'Kiểm duyệt hồ sơ'."""
+    from app.services.rag_service import _get_building_type_pccc_guidance
+
+    p_name = str(pinfo.get("name") or "Công trình").strip()
+    p_type = str(pinfo.get("type") or "Chưa khai báo loại công trình").strip()
+    reason = str(evaluation.get("appraisalReason") or "").strip()
+    basis = evaluation.get("appraisalBasis") or {}
+    checklist = evaluation.get("checklist") or []
+    lines: List[str] = [f"📋 **KẾT QUẢ KIỂM DUYỆT SƠ BỘ HỒ SƠ PCCC: {p_name}** ({p_type})"]
+    if reason:
+        lines.append(reason)
+
+    if basis.get("category") == "multi_component":
+        comp_results = basis.get("componentResults") or []
+        if comp_results:
+            req_comps = [c.get("name") for c in comp_results if (c.get("appraisalBasis") or {}).get("status") == "required"]
+            not_req_comps = [c.get("name") for c in comp_results if (c.get("appraisalBasis") or {}).get("status") == "not_required"]
+            insuff_comps = [c.get("name") for c in comp_results if (c.get("appraisalBasis") or {}).get("status") == "insufficient_data"]
+            lines.append("")
+            lines.append(
+                f"Tổng hợp {len(comp_results)} hạng mục công trình độc lập ([Nghị định 347/2026/NĐ-CP], [QCVN 06:2022/BXD]): "
+                f"{len(req_comps)} hạng mục thuộc diện thẩm định, "
+                f"{len(not_req_comps)} hạng mục dưới ngưỡng danh mục, "
+                f"{len(insuff_comps)} hạng mục cần bổ sung thông số / rà soát thủ công."
+            )
+    elif len(checklist) > 1:
+        tech_items = checklist[1:]
+        pass_items = [c for c in tech_items if c.get("result") in ("Đạt", "Không bắt buộc", "Dưới ngưỡng danh mục")]
+        fail_items = [c for c in tech_items if c.get("result") == "Không đạt"]
+        action_items = [c for c in tech_items if c.get("result") in ("Khuyến nghị mạnh", "Khuyến nghị", "Cần đo đạc")]
+        estimated_note = ""
+        if not (pass_items or fail_items or action_items):
+            floors_num = int(float(pinfo.get("floors") or 0))
+            area_num = float(pinfo.get("totalFloorArea") or pinfo.get("floorArea") or 0)
+            if floors_num > 0 or area_num > 0:
+                est_h = round(floors_num * 3.6, 1) if floors_num > 0 else 4.0
+                est_v = round(area_num * 3.6, 1) if area_num > 0 else round(floors_num * 100 * 3.6, 1)
+                preview_eval = evaluate_appraisal({**pinfo, "pcccHeight": est_h, "volume": est_v})
+                preview_tech = (preview_eval.get("checklist") or [])[1:]
+                pass_items = [c for c in preview_tech if c.get("result") in ("Đạt", "Không bắt buộc", "Dưới ngưỡng danh mục")]
+                fail_items = [c for c in preview_tech if c.get("result") == "Không đạt"]
+                action_items = [c for c in preview_tech if c.get("result") in ("Khuyến nghị mạnh", "Khuyến nghị", "Cần đo đạc")]
+                estimated_note = f" (tạm tính theo chiều cao giả định {est_h}m từ {floors_num} tầng; nhập thêm Chiều cao PCCC chính xác để chốt bảng tiêu chí)"
+
+        if pass_items or fail_items or action_items:
+            lines.append("")
+            lines.append(f"Kết quả rà soát 16 tiêu chí kỹ thuật ([QCVN 06:2022/BXD], [QCVN 10:2025/BCA], [Nghị định 105/2025/NĐ-CP]){estimated_note}:")
+            lines.append(
+                f"• Tổng hợp: {len(pass_items)} hạng mục Đạt / Không bắt buộc, "
+                f"{len(fail_items)} hạng mục Không đạt (bắt buộc bổ sung), "
+                f"{len(action_items)} hạng mục Khuyến nghị / Cần đo đạc thực tế."
+            )
+            for c in fail_items:
+                lines.append(f"• [KHÔNG ĐẠT] {c.get('criteria')}: {c.get('note')}")
+            for c in action_items[:4]:
+                lines.append(f"• [{str(c.get('result') or '').upper()}] {c.get('criteria')}: {c.get('note')}")
+            if pass_items:
+                lines.append(
+                    f"• Hạng mục Đạt / Không bắt buộc ({len(pass_items)} mục): "
+                    + ", ".join(str(c.get("criteria") or "") for c in pass_items)
+                    + "."
+                )
+        else:
+            lines.append("")
+            lines.append(
+                "• Hướng dẫn chấm điểm tự động 16 tiêu chí kỹ thuật ([QCVN 06:2022/BXD], [QCVN 10:2025/BCA]): "
+                "Vui lòng nhập bổ sung Số tầng nổi, Diện tích sàn hoặc Chiều cao PCCC (m) trong bảng Thông số kỹ thuật công trình "
+                "rồi bấm Kiểm duyệt lại hồ sơ để hệ thống tự động chấm chi tiết từng hạng mục thoát nạn, bậc chịu lửa, báo cháy và chữa cháy."
+            )
+
+    type_guidance = _get_building_type_pccc_guidance(pinfo, "")
+    if type_guidance:
+        lines.append("")
+        lines.append("Yêu cầu kỹ thuật PCCC trọng tâm theo loại hình công trình:")
+        if isinstance(type_guidance, list):
+            lines.extend(str(item) for item in type_guidance if item)
+        else:
+            lines.append(str(type_guidance))
+
+    seen = {sub.strip() for line in lines for sub in str(line).splitlines() if sub.strip()}
+    unique_warnings: List[str] = []
+    for w in evaluation.get("warnings") or []:
+        w_str = str(w or "").strip()
+        if w_str and w_str not in seen:
+            seen.add(w_str)
+            unique_warnings.append(w_str)
+    if unique_warnings:
+        lines.append("")
+        lines.extend(unique_warnings)
+
+    return "\n".join(lines)
 
 
 async def _log_inspection(

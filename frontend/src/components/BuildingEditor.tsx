@@ -1,13 +1,26 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { BuildingComponent, ProjectInfo } from '../types';
 
-export function BuildingEditor({ project, onUpdate }: { project: ProjectInfo; onUpdate: (info: Partial<ProjectInfo>) => void }) {
+export function BuildingEditor({
+  project,
+  onUpdate,
+  onVolumeChange,
+}: {
+  project: ProjectInfo;
+  onUpdate: (info: Partial<ProjectInfo>) => void;
+  onVolumeChange?: (val: string) => void;
+}) {
   const [items, setItems] = useState<BuildingComponent[]>(project.components || []);
+  const [singleVolume, setSingleVolume] = useState<string>(project.volume ? String(project.volume) : '');
   const dirty = useRef(false);
 
   useEffect(() => {
     if (!dirty.current) setItems(project.components || []);
   }, [project.components]);
+
+  useEffect(() => {
+    setSingleVolume(project.volume ? String(project.volume) : '');
+  }, [project.volume]);
 
   const commit = (next: BuildingComponent[]) => {
     dirty.current = false;
@@ -65,9 +78,17 @@ export function BuildingEditor({ project, onUpdate }: { project: ProjectInfo; on
               max="1000000000"
               step="any"
               className="w-full border border-slate-300 p-2 rounded-lg bg-white text-black font-semibold text-xs focus:border-brand-orange outline-none"
-              defaultValue={project.volume || ''}
+              value={singleVolume}
               onFocus={(e) => e.target.select()}
-              onBlur={(e) => onUpdate({ volume: Number(e.target.value) || 0 })}
+              onChange={(e) => {
+                setSingleVolume(e.target.value);
+                onVolumeChange?.(e.target.value);
+              }}
+              onBlur={(e) => {
+                const num = Number(e.target.value) || 0;
+                onVolumeChange?.(num ? String(num) : '');
+                onUpdate({ volume: num });
+              }}
             />
           </label>
         </>

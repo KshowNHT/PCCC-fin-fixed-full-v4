@@ -164,6 +164,12 @@ export function MainArea({
   // thời, dùng CHÍNH `projectInfo` (props hiện tại, luôn mới nhất) — công
   // thức giống hệt backend rules_engine.py để không lệch kết quả.
   const hasAreaContradiction = React.useMemo(() => {
+    const floorArea = projectInfo.floorArea || 0;
+    const totalFloorArea = projectInfo.totalFloorArea || 0;
+    return floorArea > 0 && totalFloorArea > 0 && totalFloorArea < floorArea;
+  }, [projectInfo.floorArea, projectInfo.totalFloorArea]);
+
+  const hasAreaMismatch = React.useMemo(() => {
     const floors = projectInfo.floors || 0;
     const floorArea = projectInfo.floorArea || 0;
     const totalFloorArea = projectInfo.totalFloorArea || 0;
@@ -178,8 +184,8 @@ export function MainArea({
     "Tổng diện tích sàn khai báo không trùng khớp với tích số giữa (diện tích sàn x số tầng), cần đối chiếu kiểm tra thực tế.";
   const displayWarnings = React.useMemo(() => {
     const others = (warnings || []).filter((w) => !w.startsWith(AREA_WARNING_TEXT));
-    return hasAreaContradiction ? [AREA_WARNING_TEXT, ...others] : others;
-  }, [warnings, hasAreaContradiction]);
+    return hasAreaMismatch ? [AREA_WARNING_TEXT, ...others] : others;
+  }, [warnings, hasAreaMismatch]);
 
   // Trạng thái kết luận 3 giá trị (bắt buộc / không bắt buộc / chưa đủ thông số) do
   // BACKEND quyết định. Nếu server cũ chưa trả `appraisalBasis` thì lùi về cờ nhị phân.

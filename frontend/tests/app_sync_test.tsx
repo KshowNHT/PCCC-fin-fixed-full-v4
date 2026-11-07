@@ -55,6 +55,8 @@ async function run() {
   await act(async()=>{delaySave.resolve();await saving;await exporting;}); delaySave=null;
   assert.equal(exports,0); assert.equal(g.mainProps.projectInfo.floors,7);
   assert.equal(g.mainProps.reviewState,"draft");
+  const headerAppraiseBtn = [...document.querySelectorAll('header button')].find(b => b.textContent?.includes('Kiểm duyệt')) as HTMLButtonElement;
+  assert.ok(headerAppraiseBtn && !headerAppraiseBtn.disabled, 'Stepped building / area mismatch (totalFloorArea >= floorArea) must NOT disable Kiểm duyệt button');
   await act(async()=>{await g.mainProps.onTriggerAppraisal();});
   await act(async()=>{await g.mainProps.onExportReport();});
   assert.equal(exports,1);

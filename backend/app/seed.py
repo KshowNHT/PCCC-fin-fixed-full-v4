@@ -5,9 +5,12 @@
 - 18 tài liệu pháp lý mặc định (từ default_documents.py, đồng nhất với bản
   JSON-file trước đây, giờ ghi thẳng vào bảng documents).
 """
+import functools
+import gzip
+import json
 import logging
 
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 
 from pathlib import Path
 from typing import Dict, Optional
@@ -43,7 +46,26 @@ QC_TC_DOC_MAPPING: Dict[str, str] = {
 }
 
 
+@functools.lru_cache(maxsize=1)
+def _load_qc_tc_bundle() -> Dict[str, str]:
+    bundle_path = Path(__file__).resolve().parent / "qc_tc_bundle.json.gz"
+    if bundle_path.exists():
+        try:
+            with gzip.open(bundle_path, "rt", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    return data
+        except Exception as e:
+            logger.warning("Không đọc được qc_tc_bundle.json.gz: %s", e)
+    return {}
+
+
+@functools.lru_cache(maxsize=64)
 def _load_document_text_from_file(doc_id: str, default_content: str) -> str:
+    bundled = _load_qc_tc_bundle().get(doc_id)
+    if bundled and len(bundled) > 200:
+        return bundled
+
     rel_path = QC_TC_DOC_MAPPING.get(doc_id)
     if not rel_path:
         return default_content
@@ -94,31 +116,17 @@ async def seed_initial_data() -> None:
                 DEFAULT_ADMIN_USERNAME,
             )
 
-        # Tối ưu hóa: Nạp toàn bộ danh sách Document hiện có trong CSDL bằng 1 truy vấn duy nhất
-        # thay vì 24 round-trips mạng tuần tự tới PostgreSQL (giảm mạnh thời gian Cold Start)
-        existing_docs_result = await db.execute(select(Document))
-        existing_map = {d.id: d for d in existing_docs_result.scalars().all()}
+        # Tối ưu hóa Cold Start: Chỉ lấy metadata nhẹ (id, is_custom, độ dài content) thay vì
+        # tải hàng megabyte toàn văn từ PostgreSQL từ xa trong mỗi lần khởi động.
+        meta_rows = (
+            await db.execute(select(Document.id, Document.is_custom, func.length(Document.content)))
+        ).all()
+        existing_meta = {row[0]: (bool(row[1]), int(row[2] or 0)) for row in meta_rows}
+        added_count = 0
 
-        if not existing_map:
-            for d in DEFAULT_DOCUMENTS:
-                content = _load_document_text_from_file(d["id"], d["content"])
-                new_doc = Document(
-                    id=d["id"],
-                    code=d["code"],
-                    title=d["title"],
-                    type=d["type"],
-                    link=d["link"],
-                    content=content,
-                    is_custom=False,
-                )
-                db.add(new_doc)
-                existing_map[d["id"]] = new_doc
-            logger.info("[Seed] Đã nạp %d tài liệu pháp lý mặc định vào PostgreSQL.", len(DEFAULT_DOCUMENTS))
-
-        # Đồng bộ và cập nhật văn bản toàn văn thực thụ (thay thế placeholder tóm tắt cũ)
         for item in DEFAULT_DOCUMENTS:
-            existing = existing_map.get(item["id"])
-            if existing is None:
+            meta = existing_meta.get(item["id"])
+            if meta is None:
                 content = _load_document_text_from_file(item["id"], item["content"])
                 db.add(Document(
                     id=item["id"],
@@ -129,10 +137,17 @@ async def seed_initial_data() -> None:
                     content=content,
                     is_custom=False,
                 ))
-            elif not existing.is_custom:
-                # Nếu nội dung cũ là placeholder hoặc có file toàn văn chi tiết hơn từ thư mục QC-TC
-                loaded = _load_document_text_from_file(item["id"], item["content"])
-                if len(loaded) > len(existing.content or "") or "chưa có toàn văn" in (existing.content or ""):
-                    existing.content = loaded
+                added_count += 1
+            else:
+                is_custom, current_len = meta
+                if not is_custom:
+                    loaded = _load_document_text_from_file(item["id"], item["content"])
+                    if len(loaded) > current_len:
+                        await db.execute(
+                            update(Document).where(Document.id == item["id"]).values(content=loaded)
+                        )
+
+        if added_count > 0:
+            logger.info("[Seed] Đã nạp %d tài liệu pháp lý mặc định vào PostgreSQL.", added_count)
 
         await db.commit()

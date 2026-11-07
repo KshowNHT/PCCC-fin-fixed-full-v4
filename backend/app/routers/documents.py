@@ -8,7 +8,7 @@ from urllib.parse import quote
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
-from sqlalchemy import and_, delete, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import get_current_user, require_admin
@@ -45,9 +45,41 @@ router = APIRouter(prefix="/api/documents", tags=["documents"])
 
 
 @router.get("")
-async def get_documents(db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
-    result = await db.execute(select(Document).order_by(Document.is_custom.desc(), Document.uploaded_at.desc(), Document.code.asc()))
-    return [d.to_dict() for d in result.scalars().all()]
+async def get_documents(
+    full: bool = Query(False, description="Trả toàn bộ nội dung văn bản thay vì bản trích lược 8000 ký tự đầu"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if full:
+        result = await db.execute(
+            select(Document).order_by(Document.is_custom.desc(), Document.uploaded_at.desc(), Document.code.asc())
+        )
+        return [d.to_dict() for d in result.scalars().all()]
+
+    stmt = select(
+        Document.id,
+        Document.code,
+        Document.title,
+        Document.type,
+        Document.link,
+        func.substr(Document.content, 1, 8000).label("content_preview"),
+        Document.is_custom,
+        Document.uploaded_at,
+    ).order_by(Document.is_custom.desc(), Document.uploaded_at.desc(), Document.code.asc())
+    rows = (await db.execute(stmt)).all()
+    return [
+        {
+            "id": r.id,
+            "code": r.code,
+            "title": r.title,
+            "type": r.type,
+            "link": r.link,
+            "content": r.content_preview or "",
+            "isCustom": r.is_custom,
+            "uploadedAt": r.uploaded_at.isoformat() if r.uploaded_at else None,
+        }
+        for r in rows
+    ]
 
 
 @router.get("/search")

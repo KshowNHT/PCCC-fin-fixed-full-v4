@@ -11,6 +11,7 @@ import { ProjectSpecsDrawer } from "./features/project-specs/components/ProjectS
 import { AppModals } from "./components/AppModals";
 import { Login } from "./components/Login";
 import { DevToolsWarningOverlay } from "./components/DevToolsWarningOverlay";
+import { BootstrapLoadingScreen } from "./components/BootstrapLoadingScreen";
 import { useAppAuth } from "./hooks/useAppAuth";
 import { useAppSessions } from "./hooks/useAppSessions";
 import { useAppDocuments } from "./hooks/useAppDocuments";
@@ -76,11 +77,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (currentUser) {
+    if (authChecked && currentUser) {
       sessionCtrl.fetchSessions();
       docCtrl.fetchDocuments();
     }
-  }, [currentUser]);
+  }, [authChecked, currentUser]);
 
   const activeProject = sessionCtrl.activeSession?.projectInfo || EMPTY_PROJECT;
   const effectiveReviewState = sessionCtrl.hasLocalDraft ? "draft" : sessionCtrl.activeSession?.reviewState || "draft";
@@ -114,7 +115,7 @@ export default function App() {
   };
 
   if (!authChecked) {
-    return <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-300 text-sm font-medium">Đang khởi tạo phiên làm việc an toàn...</div>;
+    return <BootstrapLoadingScreen onRetry={() => window.location.reload()} />;
   }
   if (!currentUser) return <Login onLogin={() => window.location.reload()} />;
 

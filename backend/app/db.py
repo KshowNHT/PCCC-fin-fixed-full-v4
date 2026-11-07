@@ -49,7 +49,7 @@ def _build_engine_options(raw_url: str):
     force_ssl = sslmode in ("require", "verify-ca", "verify-full") or ssl_param in ("true", "1", "require")
     disable_ssl = sslmode == "disable" or ssl_param in ("false", "0", "disable")
 
-    connect_args: dict = {"timeout": 10, "command_timeout": 90}
+    connect_args: dict = {"timeout": 15, "command_timeout": 45}
 
     if (not is_local and not disable_ssl) or force_ssl:
         ctx = ssl.create_default_context()

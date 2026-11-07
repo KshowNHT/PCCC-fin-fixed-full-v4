@@ -94,26 +94,30 @@ async def seed_initial_data() -> None:
                 DEFAULT_ADMIN_USERNAME,
             )
 
-        doc_count = (await db.execute(select(func.count()).select_from(Document))).scalar_one()
-        if doc_count == 0:
+        # Tối ưu hóa: Nạp toàn bộ danh sách Document hiện có trong CSDL bằng 1 truy vấn duy nhất
+        # thay vì 24 round-trips mạng tuần tự tới PostgreSQL (giảm mạnh thời gian Cold Start)
+        existing_docs_result = await db.execute(select(Document))
+        existing_map = {d.id: d for d in existing_docs_result.scalars().all()}
+
+        if not existing_map:
             for d in DEFAULT_DOCUMENTS:
                 content = _load_document_text_from_file(d["id"], d["content"])
-                db.add(
-                    Document(
-                        id=d["id"],
-                        code=d["code"],
-                        title=d["title"],
-                        type=d["type"],
-                        link=d["link"],
-                        content=content,
-                        is_custom=False,
-                    )
+                new_doc = Document(
+                    id=d["id"],
+                    code=d["code"],
+                    title=d["title"],
+                    type=d["type"],
+                    link=d["link"],
+                    content=content,
+                    is_custom=False,
                 )
+                db.add(new_doc)
+                existing_map[d["id"]] = new_doc
             logger.info("[Seed] Đã nạp %d tài liệu pháp lý mặc định vào PostgreSQL.", len(DEFAULT_DOCUMENTS))
 
         # Đồng bộ và cập nhật văn bản toàn văn thực thụ (thay thế placeholder tóm tắt cũ)
         for item in DEFAULT_DOCUMENTS:
-            existing = await db.get(Document, item["id"])
+            existing = existing_map.get(item["id"])
             if existing is None:
                 content = _load_document_text_from_file(item["id"], item["content"])
                 db.add(Document(

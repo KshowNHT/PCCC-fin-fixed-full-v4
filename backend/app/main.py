@@ -113,9 +113,11 @@ async def security_headers_middleware(request: Request, call_next):
 
 @app.on_event("startup")
 async def _startup() -> None:
+    import asyncio
     await init_db()
     await seed_initial_data()
-    await ensure_fonts_exist()
+    # Chạy nạp font trong tác vụ nền để không làm nghẽn khởi động Uvicorn
+    asyncio.create_task(ensure_fonts_exist())
 
 
 # Đăng ký các Router theo mô hình MVC / Modular Architecture

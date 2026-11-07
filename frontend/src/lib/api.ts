@@ -364,7 +364,7 @@ export async function verifySession(): Promise<AuthUser | null> {
   const token = getToken();
   if (!token) return null;
   try {
-    const res = await apiFetch("/api/auth/me");
+    const res = await apiFetch("/api/auth/me", { signal: AbortSignal.timeout(35_000) });
     if (!res.ok) return null;
     const me = await res.json();
     const latestToken = getToken() || token;

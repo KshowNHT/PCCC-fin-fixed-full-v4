@@ -15,16 +15,28 @@ interface SpecsGeneralFieldsProps {
 }
 
 const COMMON_BUILDING_TYPES = [
+  "Cơ sở kinh doanh Karaoke, Vũ trường",
   "Quán Karaoke",
   "Nhà hỗn hợp",
+  "Nhà ở riêng lẻ kết hợp kinh doanh",
+  "Nhà ở riêng lẻ",
+  "Nhà chung cư",
+  "Văn phòng, khách sạn công cộng",
   "Khách sạn",
   "Văn phòng",
+  "Chợ, Trung tâm thương mại",
   "Trung tâm thương mại",
   "Siêu thị",
-  "Nhà chung cư",
+  "Nhà để xe ô tô dạng kín",
   "Gara ô tô kín",
+  "Nhà kho xếp giá đỡ kệ cao",
   "Nhà kho",
+  "Nhà máy, nhà xưởng sản xuất",
   "Nhà máy / nhà xưởng",
+  "Cơ sở giáo dục, trường học",
+  "Bệnh viện, cơ sở y tế",
+  "Rạp hát, hội trường, trung tâm tổ chức sự kiện",
+  "Cửa hàng xăng dầu",
 ];
 
 export const SpecsGeneralFields: React.FC<SpecsGeneralFieldsProps> = ({

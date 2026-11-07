@@ -55,14 +55,30 @@ async def chat(
     is_verdict_query = is_project_verdict_query(message_text)
     is_theory_query = is_general_theory_query(message_text)
     session_reviewed = _is_reviewed(session)
+    q_lower = message_text.lower().strip()
+    has_project_type = bool(
+        session.project_data and str(session.project_data.type or "").strip()
+    )
+    has_pccc_consultation_intent = bool(
+        re.search(
+            r"(?:kết luận|kết quả|quy mô|thuộc diện|ngưỡng|thẩm duyệt|thẩm định|luật|quy chuẩn|tiêu chuẩn|nghị định|"
+            r"trích dẫn|tra cứu|yêu cầu kỹ thuật|cần lưu ý|lưu ý gì|yêu cầu gì|trang bị gì|cần trang bị|mấy lối|"
+            r"lối thoát|kiểm tra|rà soát|đánh giá|tư vấn|hướng dẫn|bố trí|thiết kế)",
+            q_lower,
+        )
+        and not re.search(
+            r"(?:thời tiết|bóng đá|giá vàng|xổ số|chứng khoán|nấu ăn)",
+            q_lower,
+        )
+    )
 
     # 1. Trường hợp hồ sơ chưa được kiểm duyệt (bản nháp):
     if not session_reviewed:
         # Nếu hỏi về kết luận thẩm duyệt/cấp phép của chính dự án này -> Yêu cầu kiểm duyệt trước (DEF-01)
         if is_verdict_query:
             reply = "Thông số đang là bản nháp, chưa được rà soát. Hãy nhập xong và bấm Kiểm duyệt hồ sơ; tôi không tự dùng thông số đang nhập để kết luận."
-        # Nếu hỏi lý thuyết / quy chuẩn / kỹ thuật chung -> Trả lời ngay kiến thức kèm trích dẫn (DEF-01)
-        elif is_theory_query:
+        # Nếu hỏi lý thuyết / quy chuẩn / kỹ thuật chung hoặc hỏi tư vấn cho loại công trình đang chọn -> Trả lời ngay kèm trích dẫn (DEF-01)
+        elif is_theory_query or (has_project_type and has_pccc_consultation_intent):
             rag_res = await generate_hybrid_rag_reply(
                 db,
                 session,
@@ -75,11 +91,14 @@ async def chat(
             reply = "Không tìm thấy quy định phù hợp để trả lời câu hỏi này trong bộ quy tắc đã xác minh. Không đủ căn cứ đưa ra kết luận kỹ thuật; cần kỹ sư bổ sung và xác nhận quy định áp dụng."
     # 2. Trường hợp hồ sơ ĐÃ được kiểm duyệt:
     else:
-        has_specific_target = bool(re.search(r"\b(?:này|hiện tại|đang nhập|đang xét|của tôi|của em|của mình)\b", message_text.lower()))
+        has_specific_target = bool(
+            re.search(r"\b(?:này|hiện tại|đang nhập|đang xét|của tôi|của em|của mình)\b", q_lower)
+            or is_verdict_query
+        )
 
-        # Nếu hỏi về đối tượng / dự án cụ thể này: chỉ tư vấn khi thuộc phạm vi quy tắc thẩm duyệt, quy chuẩn đã xác minh
+        # Nếu hỏi về đối tượng / dự án cụ thể này: trả về tư vấn toàn diện gắn với hồ sơ dự án đã kiểm duyệt
         if has_specific_target:
-            if re.search(r"kết luận|kết quả|quy mô|thuộc diện|ngưỡng|thẩm duyệt|thẩm định|luật|quy chuẩn|nghị định|trích dẫn|tra cứu", message_text.lower()):
+            if is_theory_query or is_verdict_query or has_pccc_consultation_intent:
                 rag_res = await generate_hybrid_rag_reply(
                     db,
                     session,
@@ -90,8 +109,8 @@ async def chat(
                 citations = rag_res["citations"]
             else:
                 reply = "Không tìm thấy quy định phù hợp để trả lời câu hỏi này trong bộ quy tắc đã xác minh. Không đủ căn cứ đưa ra kết luận kỹ thuật; cần kỹ sư bổ sung và xác nhận quy định áp dụng."
-        # Câu hỏi lý thuyết quy chuẩn chung (không trỏ vào đối tượng kỹ thuật cụ thể chưa có rule)
-        elif is_theory_query or re.search(r"kết luận|kết quả|quy mô|thuộc diện|ngưỡng|thẩm duyệt|thẩm định|luật|quy chuẩn|nghị định|trích dẫn|tra cứu", message_text.lower()):
+        # Câu hỏi lý thuyết quy chuẩn chung hoặc tư vấn công năng
+        elif is_theory_query or has_pccc_consultation_intent:
             rag_res = await generate_hybrid_rag_reply(
                 db,
                 session,

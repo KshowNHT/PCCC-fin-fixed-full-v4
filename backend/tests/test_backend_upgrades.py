@@ -28,8 +28,47 @@ from app.services.rag_service import SimpleTTLCache, rag_query_cache
 from app.utils_file import _extract_rich_context
 
 
-class TestBackendUpgrades(operations.Operations40):
+class TestBackendUpgrades(unittest.TestCase):
     """Test suite nghiệm thu toàn diện 5 hạng mục nâng cấp BM-01 -> BM-05."""
+
+    @classmethod
+    def setUpClass(cls):
+        async def reset():
+            import app.db_models
+            async with operations.engine.begin() as c:
+                await c.run_sync(operations.Base.metadata.drop_all)
+        asyncio.run(reset())
+        cls.ctx = operations.TestClient(main.app)
+        cls.client = cls.ctx.__enter__()
+        r = cls.client.post("/api/auth/login-json", json={"username":"admin", "password":"TestAdmin12345"})
+        assert r.status_code == 200, r.text
+        cls.admin = {"Authorization": "Bearer " + r.json()["access_token"]}
+        for name in ("staffa", "staffb"):
+            r = cls.client.post("/api/auth/users", headers=cls.admin, json={"username":name,"password":"StaffTest12345"})
+            assert r.status_code == 201, r.text
+            r = cls.client.post("/api/auth/login-json", json={"username":name,"password":"StaffTest12345"})
+            setattr(cls, name, {"Authorization":"Bearer " + r.json()["access_token"]})
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.ctx.__exit__(None, None, None)
+
+    def setUp(self):
+        main.limiter.reset()
+
+    def session(self, auth=None, project=None, reviewed=True):
+        r = self.client.post("/api/sessions", headers=auth or self.staffa,
+                             json={"projectInfo":project or {"type":"Nhà hỗn hợp","floors":2,"floorArea":100,"totalFloorArea":200}})
+        self.assertEqual(r.status_code, 201, r.text)
+        sid=r.json()["id"]
+        if reviewed:
+            result=self.client.put(f"/api/sessions/{sid}/project?appraise=true",headers=auth or self.staffa,json={})
+            self.assertEqual(result.status_code,200,result.text)
+        return sid
+
+    def upload(self, name, data, **extra):
+        return self.client.post("/api/documents/upload", headers=self.admin,
+                                files={"file":(name,data)}, data=extra)
 
     def test_bm01_rag_query_cache(self) -> None:
         """BM-01: Triển khai SimpleTTLCache cho Chatbot RAG, phản hồi < 0.05s."""

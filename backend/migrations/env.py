@@ -12,6 +12,9 @@ def migrate(connection):
     context.configure(connection=connection, target_metadata=Base.metadata)
     with context.begin_transaction():
         context.run_migrations()
+        # Tự động đảm bảo tất cả các bảng khai báo trong Base.metadata (bao gồm revoked_tokens)
+        # được tạo an toàn nếu chưa tồn tại trên cơ sở dữ liệu production/staging hiện hữu.
+        Base.metadata.create_all(connection, checkfirst=True)
         inspector = inspect(connection)
         for table in Base.metadata.sorted_tables:
             if not inspector.has_table(table.name):

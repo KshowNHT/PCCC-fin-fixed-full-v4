@@ -19,7 +19,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 import jwt
 from jwt import ExpiredSignatureError, PyJWTError as JWTError
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import (
@@ -30,7 +30,7 @@ from app.config import (
     JWT_SECRET,
 )
 from app.db import get_db
-from app.db_models import User
+from app.db_models import RevokedToken, User
 
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
@@ -61,6 +61,67 @@ def revoke_token_payload(payload: dict) -> None:
         _REVOKED_JTIS[jti] = exp_ts
     if isinstance(sid, str) and sid:
         _REVOKED_SIDS[sid] = exp_ts
+
+
+async def revoke_token_payload_db(payload: dict, db: AsyncSession, user_id: str = "") -> None:
+    """BM-03: Thu hồi token/phiên cả trên RAM (L1) và lưu vào Database PostgreSQL/SQLite (L2)."""
+    now_ts = int(time.time())
+    _prune_revoked(now_ts)
+    exp_ts = int(payload.get("exp") or (now_ts + JWT_EXPIRE_MINUTES * 60)) + JWT_REFRESH_GRACE_SECONDS + 60
+    jti = payload.get("jti")
+    sid = payload.get("sid")
+    if isinstance(jti, str) and jti:
+        _REVOKED_JTIS[jti] = exp_ts
+    if isinstance(sid, str) and sid:
+        _REVOKED_SIDS[sid] = exp_ts
+
+    expires_at = datetime.fromtimestamp(exp_ts, tz=timezone.utc)
+    sub_id = user_id or str(payload.get("sub") or "")
+    rec_jti = jti if (isinstance(jti, str) and jti) else (f"sid_{sid}" if sid else uuid.uuid4().hex)
+    revoked_record = RevokedToken(
+        jti=rec_jti,
+        user_id=sub_id,
+        sid=sid if isinstance(sid, str) else None,
+        expires_at=expires_at,
+    )
+    await db.merge(revoked_record)
+    await db.flush()
+
+
+async def check_token_revoked_db(payload: dict, db: AsyncSession) -> None:
+    """BM-03: Kiểm tra token/session trong DB (L2 Check) phòng trường hợp restart máy chủ hoặc multi-workers.
+    Nếu tìm thấy bản ghi thu hồi, tự động đồng bộ lại vào RAM (L1) và ném lỗi 401 Unauthorized."""
+    jti = payload.get("jti")
+    sid = payload.get("sid")
+    now_utc = datetime.now(timezone.utc)
+    conditions = []
+    if isinstance(jti, str) and jti:
+        conditions.append(RevokedToken.jti == jti)
+    if isinstance(sid, str) and sid:
+        conditions.append(RevokedToken.sid == sid)
+
+    if conditions:
+        stmt = (
+            select(RevokedToken)
+            .where(
+                or_(*conditions),
+                RevokedToken.expires_at > now_utc,
+            )
+            .limit(1)
+        )
+        res = await db.execute(stmt)
+        revoked_entry = res.scalars().first()
+        if revoked_entry:
+            exp_ts = int(revoked_entry.expires_at.timestamp())
+            if revoked_entry.jti:
+                _REVOKED_JTIS[revoked_entry.jti] = exp_ts
+            if revoked_entry.sid:
+                _REVOKED_SIDS[revoked_entry.sid] = exp_ts
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Phiên đăng nhập đã đăng xuất hoặc bị thu hồi. Vui lòng đăng nhập lại.",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
 
 def is_payload_revoked(payload: dict) -> bool:
@@ -178,6 +239,8 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
     payload = decode_access_token(token)
+    await check_token_revoked_db(payload, db)
+
     user_id = payload.get("sub")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()

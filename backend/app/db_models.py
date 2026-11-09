@@ -9,6 +9,7 @@
 """
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -251,3 +252,26 @@ class InspectionLog(Base):
             "nonCompliantCount": non_compliant,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
+
+
+class RevokedToken(Base):
+    """BM-03: Bảng lưu trữ bền vững các token (jti) và phiên (sid) đã thu hồi trong DB.
+    Đảm bảo không bị mất danh sách đã logout khi restart server hoặc chạy đa workers."""
+
+    __tablename__ = "revoked_tokens"
+
+    jti: Mapped[str] = mapped_column(String(64), primary_key=True, index=True)
+    user_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sid: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    revoked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+
+    def to_dict(self) -> dict:
+        return {
+            "jti": self.jti,
+            "userId": self.user_id,
+            "sid": self.sid,
+            "revokedAt": self.revoked_at.isoformat() if self.revoked_at else None,
+            "expiresAt": self.expires_at.isoformat() if self.expires_at else None,
+        }
+

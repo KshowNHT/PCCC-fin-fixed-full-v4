@@ -1,4 +1,4 @@
-ẳ export interface BuildingComponent {
+export interface BuildingComponent {
   id: string;
   name: string;
   type: string;

@@ -1,4 +1,5 @@
 """Authentication and User Management Router."""
+from datetime import datetime, timezone
 import logging
 import sys
 import time
@@ -6,11 +7,12 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlalchemy import delete, func, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import (
+    check_token_revoked_db,
     compute_password_fingerprint,
     create_access_token,
     decode_access_token,
@@ -19,6 +21,7 @@ from app.auth import (
     oauth2_scheme,
     require_admin,
     revoke_token_payload,
+    revoke_token_payload_db,
     verify_password,
 )
 from app.config import (
@@ -203,6 +206,8 @@ async def refresh_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     payload = decode_access_token(token, allow_grace_seconds=JWT_REFRESH_GRACE_SECONDS)
+    await check_token_revoked_db(payload, db)
+
     user_id = payload.get("sub")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
@@ -235,12 +240,17 @@ async def refresh_token(
 
 
 @router.post("/logout")
-async def logout_endpoint(token: Optional[str] = Depends(oauth2_scheme)):
-    """Thu hồi ngay lập tức token và phiên đăng nhập hiện tại trên máy chủ khi đăng xuất."""
+async def logout_endpoint(
+    token: Optional[str] = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+):
+    """Thu hồi ngay lập tức token và phiên đăng nhập hiện tại trên máy chủ khi đăng xuất (BM-03)."""
     if token:
         try:
             payload = decode_access_token(token, allow_grace_seconds=JWT_REFRESH_GRACE_SECONDS)
-            revoke_token_payload(payload)
+            user_id = str(payload.get("sub") or "")
+            await revoke_token_payload_db(payload, db, user_id=user_id)
+            await db.commit()
         except HTTPException:
             pass
     return {"success": True, "message": "Đã đăng xuất thành công."}

@@ -1,11 +1,12 @@
 """Documents Management and Legal Search Router."""
+from datetime import datetime, timezone
 import logging
 from pathlib import Path
 import re
 from typing import List, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile, status
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse
 from sqlalchemy import and_, delete, func, or_, select
@@ -20,6 +21,7 @@ from app.config import (
 )
 from app.db import get_db
 from app.db_models import Document, User
+from app.services.rag_service import rag_query_cache
 from app.doc_extract import (
     detect_document_metadata,
     extract_doc,
@@ -198,67 +200,154 @@ async def search_documents(
 
 @router.post("/upload", status_code=201)
 async def upload_documents(
-    file: List[UploadFile] = File(...),
+    response: Response,
+    file: Optional[List[UploadFile]] = File(None),
     code: Optional[str] = Form(None),
     title: Optional[str] = Form(None),
     type: Optional[str] = Form(None),  # noqa: A002
+    doc_type: Optional[str] = Form(None),
+    content: Optional[str] = Form(None),
     db: AsyncSession = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    if not file or len(file) > 10:
+    upload_list: List[UploadFile] = [f for f in (file or []) if f and getattr(f, "filename", None)]
+    has_content_form = bool(content and content.strip())
+    if not upload_list and not has_content_form:
         raise HTTPException(status_code=400, detail="Chọn từ 1 đến 10 file mỗi lần.")
-    if type and len(type) > 64:
+    if len(upload_list) > 10:
+        raise HTTPException(status_code=400, detail="Chọn từ 1 đến 10 file mỗi lần.")
+
+    effective_type_input = (type or doc_type or "").strip()
+    if effective_type_input and len(effective_type_input) > 64:
         raise HTTPException(status_code=422, detail="Loại tài liệu tối đa 64 ký tự.")
-    created_docs, written_paths = [], []
+
+    created_docs, written_paths, old_paths_to_delete = [], [], []
+    has_updated_existing = False
     total_size = 0
     try:
-        for i, upload in enumerate(file):
-            original_name = upload.filename or f"file_{i}"
-            dest_path, stored_name = _generate_safe_storage_path(LEGAL_DB_DIR, original_name, ALLOWED_DOCUMENT_EXTENSIONS)
-            ext = dest_path.suffix
-            content = await _read_upload_with_size_limit(upload)
-            total_size += len(content)
-            if total_size > MAX_UPLOAD_SIZE_BYTES:
-                raise HTTPException(status_code=413, detail="Tổng dung lượng file vượt giới hạn upload.")
-            await run_in_threadpool(validate_upload, content, ext)
-            written_paths.append(dest_path)
-            await run_in_threadpool(dest_path.write_bytes, content)
-            if ext == ".txt":
-                extracted = await run_in_threadpool(extract_txt, str(dest_path))
-            elif ext == ".docx":
-                extracted = await run_in_threadpool(extract_docx, str(dest_path))
-            elif ext == ".doc":
-                extracted = await run_in_threadpool(extract_doc, str(dest_path))
-            else:
-                extracted = await extract_pdf_async(str(dest_path), original_name)
-            safe_text = sanitize_text(extracted)
+        if upload_list:
+            for i, upload in enumerate(upload_list):
+                original_name = upload.filename or f"file_{i}"
+                dest_path, stored_name = _generate_safe_storage_path(LEGAL_DB_DIR, original_name, ALLOWED_DOCUMENT_EXTENSIONS)
+                ext = dest_path.suffix
+                file_bytes = await _read_upload_with_size_limit(upload)
+                total_size += len(file_bytes)
+                if total_size > MAX_UPLOAD_SIZE_BYTES:
+                    raise HTTPException(status_code=413, detail="Tổng dung lượng file vượt giới hạn upload.")
+                await run_in_threadpool(validate_upload, file_bytes, ext)
+                written_paths.append(dest_path)
+                await run_in_threadpool(dest_path.write_bytes, file_bytes)
+                if ext == ".txt":
+                    extracted = await run_in_threadpool(extract_txt, str(dest_path))
+                elif ext == ".docx":
+                    extracted = await run_in_threadpool(extract_docx, str(dest_path))
+                elif ext == ".doc":
+                    extracted = await run_in_threadpool(extract_doc, str(dest_path))
+                else:
+                    extracted = await extract_pdf_async(str(dest_path), original_name)
+                safe_text = sanitize_text(extracted)
+                if not safe_text:
+                    raise HTTPException(status_code=422, detail="Không có văn bản có thể đọc. Hãy OCR tài liệu trước khi nạp vào thư viện.")
+                if len(safe_text) > 2_000_000:
+                    raise HTTPException(status_code=413, detail="Nội dung trích xuất quá lớn.")
+                base = sanitize_text(Path(original_name.replace("\\", "/")).stem)[:255]
+                auto_meta = detect_document_metadata(original_name, safe_text)
+                doc_code = (code or "").strip() if len(upload_list) == 1 else ""
+                doc_title = (title or "").strip() if len(upload_list) == 1 else ""
+                resolved_type = effective_type_input if effective_type_input and effective_type_input not in ("Khác", "Tự động") else auto_meta["type"]
+
+                final_code = (doc_code or auto_meta["code"] or base.upper() or "VANBAN")[:255]
+                final_title = (doc_title or auto_meta["title"] or base.replace("_", " ") or "Tài liệu")[:500]
+
+                # BM-02: Kiểm tra khử trùng lặp theo mã hiệu (case-insensitive)
+                existing_doc = next((d for d in created_docs if d.code.upper() == final_code.upper()), None)
+                if not existing_doc:
+                    stmt = select(Document).where(func.upper(Document.code) == final_code.upper()).limit(1)
+                    res = await db.execute(stmt)
+                    existing_doc = res.scalars().first()
+
+                if existing_doc:
+                    if existing_doc.is_custom and existing_doc.link:
+                        old_p = resolve_stored_file(existing_doc.link, UPLOADS_DIR, LEGAL_DB_DIR)
+                        if old_p and old_p != dest_path:
+                            old_paths_to_delete.append(old_p)
+                    existing_doc.title = final_title
+                    existing_doc.type = resolved_type or "Khác"
+                    existing_doc.content = safe_text
+                    existing_doc.link = f"/data/legal_db/{stored_name}"
+                    existing_doc.is_custom = True
+                    existing_doc.uploaded_by = admin.id
+                    existing_doc.uploaded_at = datetime.now(timezone.utc)
+                    if existing_doc not in created_docs:
+                        created_docs.append(existing_doc)
+                    has_updated_existing = True
+                else:
+                    new_doc = Document(
+                        code=final_code,
+                        title=final_title,
+                        type=resolved_type or "Khác",
+                        link=f"/data/legal_db/{stored_name}",
+                        content=safe_text,
+                        is_custom=True,
+                        uploaded_by=admin.id,
+                    )
+                    db.add(new_doc)
+                    created_docs.append(new_doc)
+        elif has_content_form:
+            safe_text = sanitize_text(content or "")
             if not safe_text:
-                raise HTTPException(status_code=422, detail="Không có văn bản có thể đọc. Hãy OCR tài liệu trước khi nạp vào thư viện.")
+                raise HTTPException(status_code=422, detail="Nội dung văn bản rỗng.")
             if len(safe_text) > 2_000_000:
                 raise HTTPException(status_code=413, detail="Nội dung trích xuất quá lớn.")
-            base = sanitize_text(Path(original_name.replace("\\", "/")).stem)[:255]
-            auto_meta = detect_document_metadata(original_name, safe_text)
-            doc_code = (code or "").strip() if len(file) == 1 else ""
-            doc_title = (title or "").strip() if len(file) == 1 else ""
-            doc_type = (type or "").strip() if type and type.strip() and type not in ("Khác", "Tự động") else auto_meta["type"]
+            final_code = (code or "VANBAN").strip()[:255]
+            final_title = (title or "Tài liệu pháp lý").strip()[:500]
+            resolved_type = (effective_type_input or "Khác")[:64]
 
-            final_code = (doc_code or auto_meta["code"] or base.upper() or "VANBAN")[:255]
-            final_title = (doc_title or auto_meta["title"] or base.replace("_", " ") or "Tài liệu")[:500]
+            stmt = select(Document).where(func.upper(Document.code) == final_code.upper()).limit(1)
+            result = await db.execute(stmt)
+            existing_doc = result.scalars().first()
 
-            new_doc = Document(
-                code=final_code,
-                title=final_title,
-                type=doc_type or "Khác",
-                link=f"/data/legal_db/{stored_name}",
-                content=safe_text,
-                is_custom=True,
-                uploaded_by=admin.id,
-            )
-            db.add(new_doc)
-            created_docs.append(new_doc)
+            if existing_doc:
+                if existing_doc.is_custom and existing_doc.link:
+                    old_p = resolve_stored_file(existing_doc.link, UPLOADS_DIR, LEGAL_DB_DIR)
+                    if old_p:
+                        old_paths_to_delete.append(old_p)
+                existing_doc.title = final_title
+                existing_doc.type = resolved_type
+                existing_doc.content = safe_text
+                existing_doc.link = ""
+                existing_doc.is_custom = True
+                existing_doc.uploaded_by = admin.id
+                existing_doc.uploaded_at = datetime.now(timezone.utc)
+                created_docs.append(existing_doc)
+                has_updated_existing = True
+            else:
+                new_doc = Document(
+                    code=final_code,
+                    title=final_title,
+                    type=resolved_type,
+                    link="",
+                    content=safe_text,
+                    is_custom=True,
+                    uploaded_by=admin.id,
+                )
+                db.add(new_doc)
+                created_docs.append(new_doc)
+
         await db.flush()
         result = [d.to_dict() for d in created_docs]
+        if has_updated_existing:
+            response.status_code = status.HTTP_200_OK
+        else:
+            response.status_code = status.HTTP_201_CREATED
+
+        rag_query_cache.clear()
         await db.commit()
+        for old_p in old_paths_to_delete:
+            try:
+                old_p.unlink(missing_ok=True)
+            except OSError:
+                pass
         return result[0] if len(result) == 1 else result
     except Exception as err:
         await db.rollback()
@@ -280,6 +369,7 @@ async def delete_document(doc_id: str, db: AsyncSession = Depends(get_db), admin
 
     path = resolve_stored_file(doc.link or "", UPLOADS_DIR, LEGAL_DB_DIR) if doc.is_custom else None
     await db.delete(doc)
+    rag_query_cache.clear()
     await db.commit()
     if path:
         try:
@@ -384,6 +474,7 @@ async def reset_documents(db: AsyncSession = Depends(get_db), admin: User = Depe
                 is_custom=False,
             )
         )
+    rag_query_cache.clear()
     await db.commit()
     for path in paths:
         if path:

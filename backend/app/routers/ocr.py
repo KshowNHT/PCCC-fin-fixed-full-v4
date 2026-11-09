@@ -1,4 +1,5 @@
 """OCR and Drawing Vision Extraction Router."""
+import asyncio
 import logging
 import sys
 from datetime import datetime, timezone
@@ -37,9 +38,12 @@ logger = logging.getLogger("pccc.router.ocr")
 
 router = APIRouter(prefix="/api/ocr", tags=["ocr"])
 
+# BM-05: Khóa Semaphore giới hạn tối đa 3 tác vụ OCR xử lý song song để chống tràn RAM (OOM)
+OCR_SEMAPHORE = asyncio.Semaphore(3)
+
 
 @router.post("/extract-drawing")
-@limiter.limit("15/minute")
+@limiter.limit("5/minute")
 async def ocr_extract_drawing(
     request: Request,
     files: Optional[List[UploadFile]] = File(None),
@@ -88,13 +92,15 @@ async def ocr_extract_drawing(
             await run_in_threadpool(p.write_bytes, content)
             written_paths.append(p)
 
-        main_mod = sys.modules.get("app.main")
-        if len(written_paths) == 1:
-            ocr_fn = getattr(main_mod, "extract_project_data_from_drawing", extract_project_data_from_drawing) if main_mod else extract_project_data_from_drawing
-            extracted = await ocr_fn(str(written_paths[0]), "")
-        else:
-            multi_fn = getattr(main_mod, "extract_project_data_from_multiple_drawings", extract_project_data_from_multiple_drawings) if main_mod else extract_project_data_from_multiple_drawings
-            extracted = await multi_fn([str(p) for p in written_paths], [p.suffix for p in written_paths])
+        original_names = [f.filename or "drawing" for _, f in dest_paths]
+        async with OCR_SEMAPHORE:
+            main_mod = sys.modules.get("app.main")
+            if len(written_paths) == 1:
+                ocr_fn = getattr(main_mod, "extract_project_data_from_drawing", extract_project_data_from_drawing) if main_mod else extract_project_data_from_drawing
+                extracted = await ocr_fn(str(written_paths[0]), original_names[0])
+            else:
+                multi_fn = getattr(main_mod, "extract_project_data_from_multiple_drawings", extract_project_data_from_multiple_drawings) if main_mod else extract_project_data_from_multiple_drawings
+                extracted = await multi_fn([str(p) for p in written_paths], [p.suffix for p in written_paths])
 
         if not isinstance(extracted, dict):
             raise ValueError("OCR output must be an object")

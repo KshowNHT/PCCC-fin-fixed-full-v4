@@ -1,7 +1,9 @@
 """Hybrid RAG Service for PCCC Legal Knowledge Base & Deterministic Rules Engine."""
+import hashlib
 import logging
 import re
-from typing import Any, Dict, List, Optional
+import time
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -9,6 +11,52 @@ from app.db_models import ChatSession, Document
 from app.utils_file import _extract_rich_context, _extract_snippet, strip_vietnamese_accents
 
 logger = logging.getLogger("pccc.service.rag")
+
+
+class SimpleTTLCache:
+    """Bộ nhớ đệm TTL trong bộ nhớ với mã hóa SHA-256 và cơ chế tự động dọn rác (BM-01)."""
+
+    def __init__(self, maxsize: int = 1000, ttl_seconds: int = 86400):
+        self.maxsize = maxsize
+        self.ttl_seconds = ttl_seconds
+        self._cache: Dict[str, Tuple[Any, float]] = {}
+
+    def _normalize_key(self, query: str) -> str:
+        clean = re.sub(r"\s+", " ", (query or "").strip().lower())
+        return hashlib.sha256(clean.encode("utf-8")).hexdigest()
+
+    def get(self, query: str) -> Optional[Any]:
+        key = self._normalize_key(query)
+        entry = self._cache.get(key)
+        if entry is None:
+            return None
+        data, ts = entry
+        if time.time() - ts > self.ttl_seconds:
+            self._cache.pop(key, None)
+            return None
+        if isinstance(data, dict):
+            return {
+                "reply": data.get("reply", ""),
+                "citations": list(data.get("citations") or []),
+            }
+        return data
+
+    def set(self, query: str, data: Any) -> None:
+        key = self._normalize_key(query)
+        if len(self._cache) >= self.maxsize and key not in self._cache:
+            oldest_keys = sorted(self._cache.keys(), key=lambda k: self._cache[k][1])[:200]
+            for old_k in oldest_keys:
+                self._cache.pop(old_k, None)
+        self._cache[key] = (data, time.time())
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+    def __len__(self) -> int:
+        return len(self._cache)
+
+
+rag_query_cache = SimpleTTLCache(maxsize=1000, ttl_seconds=86400)
 
 
 async def search_citations_for_project_and_query(
@@ -205,7 +253,7 @@ async def search_citations_for_project_and_query(
             seen_core_codes.add(core_code)
 
         snippet = _extract_snippet(doc.content or "", q_lower if len(q_lower) > 2 else "thẩm duyệt", max_chars=350)
-        rich_context = _extract_rich_context(doc.content or "", q_lower if len(q_lower) > 2 else "thẩm duyệt", max_chars=2500)
+        rich_context = _extract_rich_context(doc.content or "", q_lower if len(q_lower) > 2 else "thẩm duyệt", max_chars=2500, doc_code=doc.code or "")
         citations.append({
             "id": doc.id,
             "code": doc.code,
@@ -230,7 +278,7 @@ async def search_citations_for_project_and_query(
                 if core_code:
                     seen_core_codes.add(core_code)
                 snippet = _extract_snippet(doc.content or "", "thẩm duyệt", max_chars=350)
-                rich_context = _extract_rich_context(doc.content or "", "thẩm duyệt", max_chars=2500)
+                rich_context = _extract_rich_context(doc.content or "", "thẩm duyệt", max_chars=2500, doc_code=doc.code or "")
                 citations.append({
                     "id": doc.id,
                     "code": doc.code,
@@ -546,6 +594,12 @@ async def generate_hybrid_rag_reply(
     is_general_theory: bool = False,
 ) -> Dict[str, Any]:
     """Tạo câu trả lời kết hợp tra cứu điều khoản thật và bộ quy tắc thẩm định (Ngày 4 kế hoạch & DEF-01)."""
+    # BM-01: Kiểm tra cache tức thì khi là câu hỏi lý thuyết / quy chuẩn chung (phản hồi < 0.05s không cần query DB)
+    if is_general_theory:
+        cached = rag_query_cache.get(message_text)
+        if cached is not None:
+            return cached
+
     pinfo = session.project_data.to_dict() if session.project_data else {}
     basis = (
         session.checklist[0].get("reviewedBasis")
@@ -595,10 +649,12 @@ async def generate_hybrid_rag_reply(
                 "💡 *Bạn có thể bấm vào thẻ [Mã văn bản] để xem toàn văn quy chuẩn hoặc đặt câu hỏi kèm từ khóa kỹ thuật cụ thể.*"
             )
 
-        return {
+        rag_result = {
             "reply": reply,
             "citations": citations,
         }
+        rag_query_cache.set(message_text, rag_result)
+        return rag_result
 
     # 3. Câu hỏi gắn liền với kết luận và hồ sơ công trình cụ thể
     p_name = pinfo.get("name") or "Công trình"

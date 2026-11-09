@@ -152,10 +152,21 @@ def _extract_snippet(content: str, query: str, max_chars: int = 350) -> str:
     return f"{prefix}{snippet}{suffix}"
 
 
-def _extract_rich_context(content: str, query: str, max_chars: int = 2500) -> str:
-    """Trích xuất khối nội dung chuyên sâu (nhiều điều khoản/bảng biểu) phục vụ Gemini RAG reasoning."""
+def _extract_rich_context(content: str, query: str, max_chars: int = 2500, doc_code: str = "") -> str:
+    """Trích xuất khối nội dung chuyên sâu phục vụ Gemini RAG reasoning (BM-04).
+    Ưu tiên tìm và trả về trọn vẹn Điều luật/Phụ lục qua document_parser để không
+    bị cắt đứt các ngoại lệ kỹ thuật và bảng tra cứu PCCC."""
     if not content:
         return ""
+
+    try:
+        from app.services.document_parser import find_best_legal_article
+        best_chunk = find_best_legal_article(content, query, doc_code=doc_code)
+        if best_chunk and best_chunk.full_text and len(best_chunk.full_text.strip()) > 30:
+            return best_chunk.full_text.strip()
+    except Exception:
+        pass
+
     lower_content = content.lower()
     lower_query = query.lower().strip()
 

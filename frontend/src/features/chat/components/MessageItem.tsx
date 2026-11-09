@@ -73,7 +73,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, on
     return (
       <p
         key={`line-${index}`}
-        className={`leading-relaxed text-[14.5px] break-words [overflow-wrap:anywhere] ${
+        className={`leading-relaxed text-[14.5px] break-words break-all [overflow-wrap:anywhere] ${
           isBullet ? "pl-3 text-slate-800 dark:text-slate-200 font-medium" : "text-slate-900 dark:text-slate-100"
         }`}
       >
@@ -127,7 +127,7 @@ export const MessageItem: React.FC<MessageItemProps> = React.memo(({ message, on
             </button>
           </div>
         </div>
-        <div className="space-y-1 text-slate-800 dark:text-slate-100 break-words [overflow-wrap:anywhere]">{formattedLines}</div>
+        <div className="space-y-1 text-slate-800 dark:text-slate-100 break-words break-all [overflow-wrap:anywhere]">{formattedLines}</div>
         {isAssistant && allCodes.length > 0 && onOpenCitation && (
           <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800/80 flex flex-wrap items-center gap-1.5 text-xs">
             <span className="text-[11.5px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">

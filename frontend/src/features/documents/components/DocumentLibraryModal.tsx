@@ -31,13 +31,28 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
   const [search, setSearch] = useState("");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
-  const [searchResults, setSearchResults] = useState<any[] | null>(null);
+  const [searchResults, setSearchResults] = useState<DocumentItem[] | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<DocumentItem | null>(null);
   const [previewTab, setPreviewTab] = useState<"pdf" | "text">("pdf");
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (previewDoc) {
+          setPreviewDoc(null);
+        } else {
+          onClose();
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, previewDoc, onClose]);
 
   // Tìm kiếm sâu toàn văn theo số hiệu, tiêu đề và nội dung (Ngày 3 kế hoạch)
   useEffect(() => {
@@ -150,7 +165,7 @@ export const DocumentLibraryModal: React.FC<DocumentLibraryModalProps> = ({
               <p className="text-[11px] text-slate-500">Cơ sở dữ liệu tri thức RAG được AI sử dụng để thẩm duyệt</p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
+          <button type="button" onClick={onClose} aria-label="Đóng" title="Đóng (Esc)" className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer">
             <X className="w-5 h-5" />
           </button>
         </div>

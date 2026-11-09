@@ -1,4 +1,4 @@
-export interface BuildingComponent {
+ẳ export interface BuildingComponent {
   id: string;
   name: string;
   type: string;
@@ -57,6 +57,9 @@ export interface DocumentItem {
   content?: string;
   isCustom?: boolean;
   uploadedAt?: string;
+  matchType?: string;
+  snippet?: string;
+  score?: number;
 }
 
 export interface ChatMessage {
@@ -72,13 +75,13 @@ export interface ChecklistItem {
   criteria: string;
   requirement: string;
   result:
-    | "Đạt"
-    | "Không đạt"
-    | "Không bắt buộc"
-    | "Khuyến nghị mạnh"
-    | "Khuyến nghị"
-    | "Cần xem xét"
-    | "Cần đo đạc";
+  | "Đạt"
+  | "Không đạt"
+  | "Không bắt buộc"
+  | "Khuyến nghị mạnh"
+  | "Khuyến nghị"
+  | "Cần xem xét"
+  | "Cần đo đạc";
   note: string;
   reference: string;
 }
@@ -114,11 +117,11 @@ export interface AppraisalBasis {
   categoryEvidence: string;
   ruleMode: "always" | "threshold" | "manual_review";
   thresholdSource:
-    | "manual_review"
-    | "statutory"
-    | "scale_independent"
-    | "conservative_estimate"
-    | "reference_general";
+  | "manual_review"
+  | "statutory"
+  | "scale_independent"
+  | "conservative_estimate"
+  | "reference_general";
   legalText: string;
   thresholds: AppraisalThresholdRow[];
   triggeredBy: string[];

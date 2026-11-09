@@ -53,6 +53,14 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   isExportingJson,
   currentUser = null,
 }) => {
+  const exportDisabledReason = hasAreaContradiction
+    ? "Vui lòng sửa mâu thuẫn diện tích trước khi xuất báo cáo"
+    : reviewState === "draft"
+    ? "Hồ sơ đang ở trạng thái bản nháp. Vui lòng bấm 'Kiểm duyệt hồ sơ' trước khi xuất"
+    : !hasChecklist
+    ? "Chưa có danh mục checklist thẩm duyệt để xuất báo cáo"
+    : undefined;
+
   return (
     <header className="h-14 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-2.5 sm:px-3 flex items-center justify-between gap-1.5 shrink-0 z-30 transition-colors">
       <div className="flex items-center gap-1.5 min-w-0 shrink-0">
@@ -114,6 +122,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
             isExportingPdf={isExportingPdf}
             isExportingJson={isExportingJson}
             disabled={isPending || hasAreaContradiction || !hasChecklist || reviewState === "draft"}
+            disabledTooltip={exportDisabledReason}
           />
         </div>
 

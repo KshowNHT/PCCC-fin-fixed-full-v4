@@ -26,6 +26,16 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
   onTriggerAppraisal, onReloadSession, isPending, isSaving, hasLocalDraft,
 }) => {
   const form = useProjectSpecsForm({ project, onUpdateProject, onDraftChange });
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async () => {
@@ -64,7 +74,7 @@ export const ProjectSpecsDrawer: React.FC<ProjectSpecsDrawerProps> = ({
               <h2 className="text-sm font-bold text-slate-800 dark:text-slate-100">Thông số kỹ thuật công trình</h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">Cơ sở tính toán các ngưỡng thẩm duyệt PCCC</p>
             </div>
-            <button type="button" onClick={onClose} className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
+            <button type="button" onClick={onClose} aria-label="Đóng" title="Đóng (Esc)" className="p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer">
               <X className="w-5 h-5" />
             </button>
           </div>

@@ -9,6 +9,7 @@ interface ExportReportsDropdownProps {
   isExportingPdf: boolean;
   isExportingJson: boolean;
   disabled?: boolean;
+  disabledTooltip?: string;
 }
 
 export const ExportReportsDropdown: React.FC<ExportReportsDropdownProps> = ({
@@ -19,6 +20,7 @@ export const ExportReportsDropdown: React.FC<ExportReportsDropdownProps> = ({
   isExportingPdf,
   isExportingJson,
   disabled = false,
+  disabledTooltip,
 }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -42,7 +44,7 @@ export const ExportReportsDropdown: React.FC<ExportReportsDropdownProps> = ({
           type="button"
           disabled={disabled || isAnyExporting}
           onClick={onExportDocx}
-          title="Xuất biên bản thẩm định định dạng Word (.docx)"
+          title={disabled ? (disabledTooltip || "Vui lòng bấm 'Kiểm duyệt hồ sơ' trước khi xuất báo cáo") : "Xuất biên bản thẩm định định dạng Word (.docx)"}
           className="inline-flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 text-slate-700 dark:text-slate-200 text-[11px] font-semibold whitespace-nowrap shrink-0 shadow-xs transition-all cursor-pointer disabled:opacity-50"
         >
           {isExportingDocx ? <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" /> : <FileText className="w-3.5 h-3.5 text-blue-600" />}
@@ -55,7 +57,7 @@ export const ExportReportsDropdown: React.FC<ExportReportsDropdownProps> = ({
           type="button"
           disabled={disabled || isAnyExporting}
           onClick={onExportPdf}
-          title="Xuất bản in báo cáo thẩm định định dạng PDF (.pdf)"
+          title={disabled ? (disabledTooltip || "Vui lòng bấm 'Kiểm duyệt hồ sơ' trước khi xuất báo cáo") : "Xuất bản in báo cáo thẩm định định dạng PDF (.pdf)"}
           className="inline-flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-red-300 dark:hover:border-red-600 text-slate-700 dark:text-slate-200 text-[11px] font-semibold whitespace-nowrap shrink-0 shadow-xs transition-all cursor-pointer disabled:opacity-50"
         >
           {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin text-red-600" /> : <FileSpreadsheet className="w-3.5 h-3.5 text-red-600" />}
@@ -68,7 +70,7 @@ export const ExportReportsDropdown: React.FC<ExportReportsDropdownProps> = ({
           type="button"
           disabled={disabled || isAnyExporting}
           onClick={onExportJson}
-          title="Xuất dữ liệu thẩm định định dạng JSON (.json)"
+          title={disabled ? (disabledTooltip || "Vui lòng bấm 'Kiểm duyệt hồ sơ' trước khi xuất dữ liệu") : "Xuất dữ liệu thẩm định định dạng JSON (.json)"}
           className="inline-flex items-center gap-1 px-1.5 py-1.5 rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 hover:border-emerald-300 dark:hover:border-emerald-600 text-slate-700 dark:text-slate-200 text-[11px] font-semibold whitespace-nowrap shrink-0 shadow-xs transition-all cursor-pointer disabled:opacity-50"
         >
           {isExportingJson ? <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600" /> : <Code2 className="w-3.5 h-3.5 text-emerald-600" />}

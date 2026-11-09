@@ -67,6 +67,15 @@ export function DocumentPreviewModal({
     };
   }, [previewDoc?.id]);
 
+  useEffect(() => {
+    if (!previewDoc) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [previewDoc, onClose]);
+
   if (!previewDoc) return null;
 
   return (

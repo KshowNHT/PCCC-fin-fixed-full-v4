@@ -33,6 +33,14 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
     handleReset,
   } = useBlueprintOcr({ sessionId, onApply, onClose });
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -53,6 +61,8 @@ export const BlueprintUploadModal: React.FC<BlueprintUploadModalProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Đóng"
+            title="Đóng (Esc)"
             className="p-1 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 cursor-pointer"
           >
             <X className="w-5 h-5" />

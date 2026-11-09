@@ -36,8 +36,8 @@ export const AreaWarningBanner: React.FC<AreaWarningBannerProps> = ({ warnings }
 
       {expanded && (
         <ul className="mt-2 space-y-1.5 list-disc list-inside max-w-5xl mx-auto pl-1 text-[11.5px] leading-relaxed border-t border-amber-200/60 dark:border-amber-900/60 pt-2 animate-in fade-in duration-150 text-amber-900/90 dark:text-amber-200/90">
-          {warnings.map((w, i) => (
-            <li key={`warn-${i}`}>{w}</li>
+          {warnings.map((w) => (
+            <li key={w}>{w}</li>
           ))}
         </ul>
       )}

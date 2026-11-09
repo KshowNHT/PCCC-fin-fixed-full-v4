@@ -34,8 +34,8 @@ export const MessageList: React.FC<MessageListProps> = ({
             Trợ lý AI Thẩm duyệt PCCC
           </h2>
           <p className="text-sm text-slate-500 leading-relaxed">
-            Hệ thống rà soát an toàn PCCC chuyên sâu theo Nghị định 136/2020/NĐ-CP,
-            Nghị định 50/2024/NĐ-CP và QCVN 06:2022/BXD.
+            Hệ thống rà soát an toàn PCCC chuyên sâu theo Nghị định 105/2025/NĐ-CP,
+            Nghị định 347/2026/NĐ-CP và QCVN 06:2022/BXD (Sửa đổi 1:2023).
           </p>
         </div>
 
@@ -52,7 +52,7 @@ export const MessageList: React.FC<MessageListProps> = ({
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
             <h3 className="text-xs font-bold text-slate-800">Kiểm duyệt pháp quy</h3>
             <p className="text-[11px] text-slate-500">
-              Đối soát 17-38 tiêu chí kỹ thuật và ngưỡng thẩm duyệt bắt buộc.
+              Đối soát 16 hạng mục kỹ thuật và ngưỡng thẩm duyệt bắt buộc.
             </p>
           </div>
 

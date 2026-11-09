@@ -40,7 +40,10 @@ export function useAppExport(
           expectedRevision: getRevisionHeader(activeSession.id)["If-Match"],
         }),
       });
-      if (!res.ok) throw new Error("Không thể tạo file báo cáo Word.");
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail || "Không thể tạo file báo cáo Word.");
+      }
       const blob = await res.blob();
       downloadBlob(blob, `Tu_van_PCCC_${safeFilename}.docx`);
     } catch (err: unknown) {
@@ -65,7 +68,10 @@ export function useAppExport(
           expectedRevision: getRevisionHeader(activeSession.id)["If-Match"],
         }),
       });
-      if (!res.ok) throw new Error("Không thể tạo file báo cáo PDF.");
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail || "Không thể tạo file báo cáo PDF.");
+      }
       const blob = await res.blob();
       downloadBlob(blob, `Tu_van_PCCC_${safeFilename}.pdf`);
     } catch (err: unknown) {
@@ -90,7 +96,10 @@ export function useAppExport(
           expectedRevision: getRevisionHeader(activeSession.id)["If-Match"],
         }),
       });
-      if (!res.ok) throw new Error("Không thể tạo file JSON dữ liệu.");
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.detail || "Không thể tạo file JSON dữ liệu.");
+      }
       const blob = await res.blob();
       downloadBlob(blob, `Tu_van_PCCC_${safeFilename}.json`);
     } catch (err: unknown) {

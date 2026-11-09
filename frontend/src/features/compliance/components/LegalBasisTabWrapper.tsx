@@ -74,7 +74,7 @@ export const LegalBasisTabWrapper: React.FC<LegalBasisTabWrapperProps> = ({
           <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-xs space-y-3 flex flex-col">
             <div className="border-b border-slate-100 dark:border-slate-800 pb-2">
               <h3 className="font-bold text-xs uppercase text-slate-800 dark:text-slate-200">Phân bố tiêu chí rà soát</h3>
-              <p className="text-[11px] text-slate-400 dark:text-slate-500">Tỷ lệ tuân thủ theo 17-38 hạng mục</p>
+              <p className="text-[11px] text-slate-400 dark:text-slate-500">Tỷ lệ tuân thủ 16 hạng mục kỹ thuật QCVN 06</p>
             </div>
 
             {chartData.length > 0 ? (

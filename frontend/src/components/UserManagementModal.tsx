@@ -100,6 +100,14 @@ export function UserManagementModal({
     }
   }, [isAdmin, activeTab]);
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
@@ -404,7 +412,7 @@ export function UserManagementModal({
                       value={username}
                       onChange={(e) => setUsername(e.target.value)}
                       placeholder="VD: ky_su_01"
-                      pattern="^[a-zA-Z0-9_.-]+$"
+                      pattern="^[a-zA-Z0-9_.\-]+$"
                       minLength={3}
                       maxLength={64}
                       required

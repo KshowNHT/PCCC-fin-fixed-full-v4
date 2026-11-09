@@ -22,6 +22,14 @@ export const InspectionLogPanel: React.FC<InspectionLogPanelProps> = ({
     handleChangeScope,
   } = useInspectionLogs({ sessionId });
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[88vh] overflow-hidden flex flex-col animate-in fade-in zoom-in-95 duration-200">
@@ -43,8 +51,9 @@ export const InspectionLogPanel: React.FC<InspectionLogPanelProps> = ({
           <button
             type="button"
             onClick={onClose}
+            aria-label="Đóng"
+            title="Đóng (Esc)"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
-            title="Đóng"
           >
             <X className="w-5 h-5" />
           </button>
